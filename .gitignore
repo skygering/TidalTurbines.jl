@@ -3,3 +3,13 @@
 *.jl.mem
 /docs/Manifest*.toml
 /docs/build/
+/figures
+*.txt
+*.h5
+*.vtu
+*.pvd
+*.control
+*.mesh
+*.tec
+
+examples/tsunami/out
