@@ -1,0 +1,10 @@
+# This file is machine-generated - editing it directly is not advised
+
+julia_version = "1.12.6"
+manifest_format = "2.0"
+project_hash = "91b003615794787e9ff584e7cc0e21b7f105bdee"
+
+[[deps.TidalTurbines]]
+path = "."
+uuid = "c76bb1d2-eee4-4fb3-a690-55bfa31cf500"
+version = "1.0.0-DEV"
