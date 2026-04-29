@@ -41,7 +41,7 @@ ax1 = Axis3(fig1[1, 1],
     ylabel = "y [m]",
     zlabel = "z [m]"
 )
-surface!(ax1, x, y, z, colormap = :greenbrownterrain)
+CairoMakie.surface!(ax1, x, y, z, colormap = :greenbrownterrain)
 display(fig1)
 save("figures/tsunami/okushiri_tsunami_bath.png", fig1)
 
