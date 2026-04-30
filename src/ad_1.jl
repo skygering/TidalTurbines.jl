@@ -12,6 +12,11 @@ using TrixiBottomTopography
 using CairoMakie
 using Trixi2Vtk
 
+include("bathymetry.jl")
+include("boundary_conditions.jl")
+include("source_terms.jl")
+include("power_output.jl")
+
 mkpath("examples/tsunami/out")
 
 # (1) plot the raw bathymetry file - this file has columns: x(m), y(m), and z(m)
@@ -77,7 +82,7 @@ equations = ShallowWaterEquations2D(gravity = 9.81, H0 = 0.0)
 spline_bathymetry_file = Trixi.download("https://gist.githubusercontent.com/andrewwinters5000/21255c980c4eda5294f91e8dfe6c7e33/raw/1afb73928892774dc3a902e0c46ffd882ef03ee3/monai_bathymetry_data.txt",
                                         joinpath(@__DIR__, "monai_bathymetry_data.txt"));
 const bath_spline_struct = BicubicBSpline(spline_bathymetry_file, end_condition = "not-a-knot")
-bathymetry(x::Float64, y::Float64) = spline_interpolation(bath_spline_struct, x, y);
+bathymetry(x, y) = spline_interpolation(bath_spline_struct, x, y);
 
 @inline function initial_condition_monai_tsunami(x, t, equations::ShallowWaterEquations2D)
     # Initially water is at rest
@@ -105,7 +110,7 @@ wavemaker_bc_file = Trixi.download("https://gist.githubusercontent.com/andrewwin
                                    joinpath(@__DIR__, "monai_wavemaker_bc.txt"));
 
 const h_spline_struct = CubicBSpline(wavemaker_bc_file; end_condition = "not-a-knot")
-H_from_wave_maker(t::Float64) = spline_interpolation(h_spline_struct, t);
+H_from_wave_maker(t) = spline_interpolation(h_spline_struct, t);
 
 @inline function boundary_condition_wave_maker(u_inner, normal_direction::AbstractVector,
                                                x, t, surface_flux_functions,
@@ -174,13 +179,16 @@ volume_integral = VolumeIntegralShockCapturingHG(indicator_sc;
 
 solver = DGSEM(basis, surface_flux, volume_integral)
 
-mesh_file = joinpath(@__DIR__, "monai_shore.mesh")
+mesh_file = joinpath(@__DIR__, "../examples/tsunami/monai_shore.mesh")
 
 mesh = UnstructuredMesh2D(mesh_file)
 
+
+
+
 semi = SemidiscretizationHyperbolic(mesh, equations, initial_condition, solver;
                                     boundary_conditions = boundary_condition,
-                                    source_terms = source_terms_manning_friction);
+                                    source_terms = source_terms_manning_plus_turbines);
 
 tspan = (0.0, 22.5)
 ode = semidiscretize(semi, tspan);
@@ -192,12 +200,44 @@ save_solution = SaveSolutionCallback(dt = 0.5,
                                     save_initial_solution = true,
                                     save_final_solution = true)
 stepsize_callback = StepsizeCallback(cfl = 0.6)
+# callbacks = CallbackSet(analysis_callback,
+#                         stepsize_callback,
+#                         save_solution);
+
+power_callback = SimplePowerOutputCallback(semi, turbines;
+                                           filename = "out/turbine_power.csv",
+                                           dt = 0.05,
+                                           rho = 1000.0)
+
 callbacks = CallbackSet(analysis_callback,
                         stepsize_callback,
-                        save_solution);
+                        save_solution,
+                        power_callback);
 
 stage_limiter! = PositivityPreservingLimiterShallowWater(variables = (waterheight,))
 sol = solve(ode, SSPRK43(stage_limiter!); dt = 1.0,
           ode_default_options()..., callback = callbacks, adaptive = false);
 
 trixi2vtk("examples/tsunami/out/solution_*.h5", output_directory = "examples/tsunami/out/vtk")
+
+function make_turbines(p)
+    return [
+        (x = p[1], y = p[2]),
+        (x = p[5], y = p[6]),
+    ]
+end
+
+function build_problem(p)
+    local_source_terms = (u, x, t, equations) ->
+        source_terms_manning_plus_turbines_param(u, x, t, equations, p)
+
+    semi = SemidiscretizationHyperbolic(
+        mesh, equations, initial_condition, solver;
+        boundary_conditions = boundary_condition,
+        source_terms = local_source_terms
+    )
+
+    tspan = (0.0, 10.0)
+    ode = semidiscretize(semi, tspan)
+    return ode, semi
+end

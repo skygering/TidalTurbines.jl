@@ -1,46 +1,13 @@
 export source_terms_manning_friction
 
-@inline function source_terms_manning_friction(u, x, t, equations::ShallowWaterEquations2D)
-    h, hv_1, hv_2, _ = u
+using HOHQMesh
+using OrdinaryDiffEqSSPRK
+using Trixi
+using TrixiShallowWater
+using TrixiBottomTopography
+using CairoMakie
+using Trixi2Vtk
 
-    n = 0.001
-    h = (h^2 + max(h^2, 1e-8)) / (2 * h)
-
-    Sf = -equations.gravity * n^2 * h^(-7 / 3) * sqrt(hv_1^2 + hv_2^2)
-
-    return SVector(zero(eltype(x)), Sf * hv_1, Sf * hv_2, zero(eltype(x)))
-end
-
-# -------------------------------------------------------------------
-# Turbine definitions
-# -------------------------------------------------------------------
-# const turbines = [
-#     (
-#         x0 = 3.80,
-#         y0 = 1.70,
-#         D = 0.20,
-#         r_support = 0.15,
-#         Ct_rated = 0.80,
-#         Cp_rated = 0.45,
-#         u_in = 0.20,
-#         u_rated = 0.80,
-#         u_out = 2.50,
-#         h_min = 0.02
-#     )
-#     # ,
-#     # (
-#     #     x0 = 4.20,
-#     #     y0 = 1.70,
-#     #     D = 0.20,
-#     #     r_support = 0.15,
-#     #     Ct_rated = 0.80,
-#     #     Cp_rated = 0.45,
-#     #     u_in = 0.20,
-#     #     u_rated = 0.80,
-#     #     u_out = 2.50,
-#     #     h_min = 0.02
-#     # )
-# ]
 
 @inline function Cp_from_Ct(Ct)
     Ct_clamped = clamp(Ct, 0.0, 1.0)
@@ -50,10 +17,12 @@ end
 const Ct_rated_val = 0.516
 const Cp_rated_val = Cp_from_Ct(Ct_rated_val)
 
-const turbines = [
-    (
-        x0 = 3.80,
-        y0 = 1.70,
+function make_turbines(p)
+    x0, y0 = p
+
+    return [(
+        x0 = x0,
+        y0 = y0,
         D = 0.30,
         r_support = 0.15,
         Ct_rated = Ct_rated_val,
@@ -62,8 +31,8 @@ const turbines = [
         u_rated = 3.05,
         u_out = 6.00,
         h_min = 0.00
-    )
-]
+    )]
+end
 
 const XI_BUMP = 1.45661
 
@@ -98,46 +67,6 @@ end
     ψy = bump_1d(x2, turb.y0, turb.r_support)
     return ψx * ψy / (XI_BUMP * turb.r_support^2)
 end
-
-# -------------------------------------------------------------------
-# Turbine thrust and power curves
-# -------------------------------------------------------------------
-# @inline function Ct_turbine(U, turb)
-#     u_in     = turb.u_in
-#     u_rated  = turb.u_rated
-#     u_out    = turb.u_out
-#     Ct_rated = turb.Ct_rated
-
-#     if U <= u_in
-#         return 0.0
-#     elseif U < u_rated
-#         s = (U - u_in) / (u_rated - u_in)
-#         return Ct_rated * smoothstep(s)
-#     elseif U < u_out
-#         s = (U - u_rated) / (u_out - u_rated)
-#         return Ct_rated * (1.0 - 0.5 * smoothstep(s))
-#     else
-#         return 0.0
-#     end
-# end
-
-# @inline function Cp_turbine(U, turb)
-#     u_in     = turb.u_in
-#     u_rated  = turb.u_rated
-#     u_out    = turb.u_out
-#     Cp_rated = turb.Cp_rated
-
-#     if U <= u_in
-#         return 0.0
-#     elseif U < u_rated
-#         s = (U - u_in) / (u_rated - u_in)
-#         return Cp_rated * smoothstep(s)
-#     elseif U < u_out
-#         return Cp_rated * (u_rated / U)^3
-#     else
-#         return 0.0
-#     end
-# end
 
 @inline function Ct_turbine(U, turb)
     u_in      = turb.u_in       # 1.0
@@ -182,30 +111,75 @@ end
 # Combined source terms:
 #   Manning friction + distributed turbine drag
 # -------------------------------------------------------------------
-@inline function source_terms_manning_plus_turbines(u, x, t,
-                                                    equations::ShallowWaterEquations2D)
+# @inline function source_terms_manning_plus_turbines(u, x, t,
+#                                                     equations::ShallowWaterEquations2D)
+#     h, hv_1, hv_2, _ = u
+
+#     T = eltype(x)
+#     zero_T = zero(T)
+
+#     # -------------------------------
+#     # Manning friction
+#     # -------------------------------
+#     n = 0.001
+#     h_eff = max(h, equations.threshold_limiter)
+
+#     h_fric = (h_eff^2 + max(h_eff^2, 1e-8)) / (2 * h_eff)
+#     Sf = -equations.gravity * n^2 * h_fric^(-7 / 3) * sqrt(hv_1^2 + hv_2^2)
+
+#     S_h   = zero_T
+#     S_hv1 = Sf * hv_1
+#     S_hv2 = Sf * hv_2
+#     S_b   = zero_T
+
+#     # -------------------------------
+#     # Turbine drag from all turbines
+#     # -------------------------------
+#     if h_eff > equations.threshold_limiter
+#         v1 = hv_1 / h_eff
+#         v2 = hv_2 / h_eff
+#         U  = sqrt(v1^2 + v2^2)
+
+#         for turb in turbines
+#             if h_eff > turb.h_min
+#                 dA = turbine_density_single(x, turb)
+#                 if dA > 0
+#                     At = 0.25 * pi * turb.D^2
+#                     Ct = Ct_turbine(U, turb)
+
+#                     Kt = 0.5 * Ct * At * dA / h_eff
+
+#                     S_hv1 -= Kt * U * hv_1
+#                     S_hv2 -= Kt * U * hv_2
+#                 end
+#             end
+#         end
+#     end
+
+#     return SVector(S_h, S_hv1, S_hv2, S_b)
+# end
+
+@inline function source_terms_manning_plus_turbines_param(u, x, t,
+                                                          equations::ShallowWaterEquations2D,
+                                                          turbines)
     h, hv_1, hv_2, _ = u
 
-    T = eltype(x)
+    T = eltype(u)
     zero_T = zero(T)
 
-    # -------------------------------
     # Manning friction
-    # -------------------------------
     n = 0.001
     h_eff = max(h, equations.threshold_limiter)
 
-    h_fric = (h_eff^2 + max(h_eff^2, 1e-8)) / (2 * h_eff)
-    Sf = -equations.gravity * n^2 * h_fric^(-7 / 3) * sqrt(hv_1^2 + hv_2^2)
+    h_fric = (h_eff^2 + max(h_eff^2, T(1e-8))) / (2 * h_eff)
+    Sf = -equations.gravity * n^2 * h_fric^(-T(7) / T(3)) * sqrt(hv_1^2 + hv_2^2)
 
     S_h   = zero_T
     S_hv1 = Sf * hv_1
     S_hv2 = Sf * hv_2
     S_b   = zero_T
 
-    # -------------------------------
-    # Turbine drag from all turbines
-    # -------------------------------
+    # Turbine drag
     if h_eff > equations.threshold_limiter
         v1 = hv_1 / h_eff
         v2 = hv_2 / h_eff
@@ -214,11 +188,10 @@ end
         for turb in turbines
             if h_eff > turb.h_min
                 dA = turbine_density_single(x, turb)
-                if dA > 0
-                    At = 0.25 * pi * turb.D^2
+                if dA > zero_T
+                    At = T(0.25) * T(pi) * turb.D^2
                     Ct = Ct_turbine(U, turb)
-
-                    Kt = 0.5 * Ct * At * dA / h_eff
+                    Kt = T(0.5) * Ct * At * dA / h_eff
 
                     S_hv1 -= Kt * U * hv_1
                     S_hv2 -= Kt * U * hv_2
@@ -266,10 +239,15 @@ end
     return 0.5 * rho * Cp * At * dA * U^3
 end
 
-@inline function turbine_power_density_total(u, x, equations; rho = 1000.0)
-    p = 0.0
+@inline function turbine_power_density_total(u, x, equations, turbines; rho = 1000.0)
+    p_total = zero(eltype(u))
     for turb in turbines
-        p += turbine_power_density_single(u, x, equations, turb; rho = rho)
+        p_total += turbine_power_density_single(u, x, equations, turb; rho = rho)
     end
-    return p
+    return p_total
 end
+
+semi = SemidiscretizationHyperbolic(mesh, equations, initial_condition, solver;
+                                    boundary_conditions = boundary_condition,
+                                    source_terms = source_terms_manning_plus_turbines);
+

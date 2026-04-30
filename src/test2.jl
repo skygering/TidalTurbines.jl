@@ -12,6 +12,11 @@ using TrixiBottomTopography
 using CairoMakie
 using Trixi2Vtk
 
+include("bathymetry.jl")
+include("boundary_conditions.jl")
+include("source_terms.jl")
+include("power_output.jl")
+
 mkpath("examples/tsunami/out")
 
 # (1) plot the raw bathymetry file - this file has columns: x(m), y(m), and z(m)
@@ -174,15 +179,15 @@ volume_integral = VolumeIntegralShockCapturingHG(indicator_sc;
 
 solver = DGSEM(basis, surface_flux, volume_integral)
 
-mesh_file = joinpath(@__DIR__, "monai_shore.mesh")
+mesh_file = joinpath(@__DIR__, "../examples/tsunami/monai_shore.mesh")
 
 mesh = UnstructuredMesh2D(mesh_file)
 
 semi = SemidiscretizationHyperbolic(mesh, equations, initial_condition, solver;
                                     boundary_conditions = boundary_condition,
-                                    source_terms = source_terms_manning_friction);
+                                    source_terms = source_terms_manning_plus_turbines);
 
-tspan = (0.0, 22.5)
+tspan = (0.0, 10)
 ode = semidiscretize(semi, tspan);
 
 analysis_interval = 1000
@@ -192,12 +197,24 @@ save_solution = SaveSolutionCallback(dt = 0.5,
                                     save_initial_solution = true,
                                     save_final_solution = true)
 stepsize_callback = StepsizeCallback(cfl = 0.6)
+
+power_callback = SimplePowerOutputCallback(semi, turbines;
+                                           filename = "out/turbine_power.csv",
+                                           dt = 0.05,
+                                           rho = 1000.0)
+
 callbacks = CallbackSet(analysis_callback,
                         stepsize_callback,
-                        save_solution);
+                        save_solution,
+                        power_callback);
+
+# callbacks = CallbackSet(analysis_callback,
+#                         stepsize_callback,
+#                         save_solution);
 
 stage_limiter! = PositivityPreservingLimiterShallowWater(variables = (waterheight,))
 sol = solve(ode, SSPRK43(stage_limiter!); dt = 1.0,
           ode_default_options()..., callback = callbacks, adaptive = false);
 
 trixi2vtk("examples/tsunami/out/solution_*.h5", output_directory = "examples/tsunami/out/vtk")
+

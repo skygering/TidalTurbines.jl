@@ -28,12 +28,6 @@ equations = ShallowWaterEquations2D(gravity = 9.81, H0 = 0.0)
 # (2) boundary boundary conditions
 initial_condition = initial_condition_tidal_surge;
 
-# boundary_condition = (; 
-#     Left = boundary_condition_tidal_inflow,
-#     Right = boundary_condition_tidal_outflow,
-#     Top = boundary_condition_slip_wall,
-#     Bottom = boundary_condition_slip_wall
-# )
 boundary_condition = (;
     Left   = boundary_condition_wave_maker_m2,
     Right  = boundary_condition_outflow_simple,
