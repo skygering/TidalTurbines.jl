@@ -13,21 +13,26 @@ using ForwardDiff
 ## -----------------------------------------
 # Use shallow water equations
 #  -----------------------------------------
-equations = ShallowWaterEquations2D(gravity = 9.81, H0 = 0.0)
+equations = ShallowWaterEquations2D(gravity = 1.0, H0 = 0.0)
 
 
 ## -----------------------------------------
 # Initial turbine position and radius
 #  -----------------------------------------
-locs = [4.0, 2.0]#, 3.0, 2.0, 2.0, 3.0];  # (x1, y1, x2, y2)
-R = 0.3;
+locs = [11.0, 4.0]#, 3.0, 2.0, 2.0, 3.0];  # (x1, y1, x2, y2)
+Diameter = 1.0;
+R = 0.5;
 
 ## ----------------------------------------- 
 # Bathymetry & Mesh
 #  -----------------------------------------
-flat_bathymetry(x, y) = -2.0
+#flat_bathymetry(x, y) = -2.0
+include("bathymetry.jl")
+include("boundary_conditions.jl")
+bathy = FlatBathymetry(-2.0)
 
-# Create an unstructured mesh project
+
+## Create an unstructured mesh project
 flat_bottom = newProject("flat_bottom", "out");
 
 setPolynomialOrder!(flat_bottom, 1)
@@ -35,8 +40,8 @@ setMeshFileFormat!(flat_bottom, "ISM-V2");
 HOHQMesh.getModelDict(flat_bottom);
 
 # Set domain size (edges) we can set a background Cartesian box mesh required to define order `[top, left, bottom, right]`.
-bounds = [4.0, 0.0, 0.0, 8.0]
-N = [16, 8, 0] # Coarse background grid: 8 x 4 in (x, y)
+bounds = [8.0, 0.0, 0.0, 22.0]
+N = [22, 8, 0] # Coarse background grid: 8 x 4 in (x, y)
 addBackgroundGrid!(flat_bottom, bounds, N)
 
 # Add refinement regions around turbines
@@ -59,7 +64,7 @@ mesh = UnstructuredMesh2D(mesh_file)
 ## ----------------------------------------- 
 # Initial Conditions
 #  -----------------------------------------
-
+initial_condition = make_initial_condition_tidal_surge(bathy)
 @inline function initial_condition_tsunami(x, t, equations::ShallowWaterEquations2D)
     ## Initially water is at rest
     v1 = 0.0
@@ -75,18 +80,27 @@ mesh = UnstructuredMesh2D(mesh_file)
     return SVector(h, h * v1, h * v2, b)
 end
 
-initial_condition = initial_condition_tsunami;
+# initial_condition = initial_condition_tsunami;
 
 ## ----------------------------------------- 
 # Boundary Conditions
 #  -----------------------------------------
 # RightBC = BoundaryConditionWaterHeight(t -> h_boundary(t), equations)
 include("boundary_conditions.jl")
-boundary_condition = (; Bottom = boundary_condition_slip_wall,
-                      Top = boundary_condition_slip_wall,
-                      Right = boundary_condition_slip_wall,
-                      Left = boundary_condition_tidal_surge);
 
+# boundary_condition = (; Bottom = boundary_condition_slip_wall,
+#                       Top = boundary_condition_slip_wall,
+#                       Right = boundary_condition_slip_wall,
+#                       Left = boundary_condition_tidal_surge);
+wm = WaveMaker(0.5, 0.25) # amplitude, frequency 
+equations = ShallowWaterEquations2D(gravity = 1.0, H0 = 0.0)
+initial_condition = make_initial_condition_tidal_surge(bathy)
+boundary_condition = (;
+    Bottom = boundary_condition_slip_wall,
+    Top    = boundary_condition_slip_wall,
+    Left   = make_boundary_condition_flather_left(wm, bathy),
+    Right  = make_boundary_condition_flather_right(bathy),
+)
 
 ## ----------------------------------------- 
 # Turbine forcing & total drag
@@ -97,11 +111,8 @@ boundary_condition = (; Bottom = boundary_condition_slip_wall,
     """
     1D smooth bump function, sharp and localized.
     Centered at ξ=0 with characteristic radius r.
-    Uses cosine profile for sharper localization than Gaussian.
     """
     s = abs(ξ) / r
-    # Cosine-based bump: sharp edges, smooth everywhere
-    #return (1.0 + cos(π * s)) / 2.0 * (1.0 - tanh(5.0 * (s - 1.0))) / 2.0
     return exp(-s^2 / 0.5)  # tighter Gaussian
 end
 
@@ -178,15 +189,15 @@ const Cp_rated_val = Cp_from_Ct(Ct_rated_val)
 
 const turbines = [
     (
-        x0 = 3.80,
-        y0 = 1.70,
-        D = 0.30,
-        r_support = 0.15,
+        x0 = 11.0,
+        y0 = 4.0,
+        D = 1.0,
+        r_support = 0.5,
         Ct_rated = Ct_rated_val,
         Cp_rated = Cp_rated_val,
-        u_in = 1.00,
-        u_rated = 3.05,
-        u_out = 6.00,
+        u_in = 1/14,
+        u_rated = 3/14,
+        u_out = 6/14,
         h_min = 0.00
     )
 ]
@@ -210,8 +221,8 @@ end
 end
 
 @inline function Ct_turbine(U, turb)
-    u_in      = turb.u_in       # 1.0
-    u_rated   = turb.u_rated    # 3.05
+    u_in      = turb.u_in       # 1.0/14
+    u_rated   = turb.u_rated    # 3.05/14
     u_out     = turb.u_out
     Ct_rated  = turb.Ct_rated   # 0.516
 
@@ -301,7 +312,6 @@ end
 end
 
 
-
 ## ----------------------------------------- 
 # Finite volume solver
 #  -----------------------------------------
@@ -332,7 +342,7 @@ semi = SemidiscretizationHyperbolic(mesh, equations, initial_condition, solver;
                                     boundary_conditions = boundary_condition,
                                     source_terms = source_terms_manning_plus_turbines);
 
-tspan = (0.0, 10.0)
+tspan = (0.0, 30.0)
 ode = semidiscretize(semi, tspan);
 
 ## ----------------------------------------- 
@@ -368,11 +378,11 @@ trixi2vtk("out/solution_*.h5", output_directory = "out")
 
 # jacobian_ad_forward(semi)
 u0_ode = Trixi.compute_coefficients(0.0, semi)
-##
+
 
 J = ForwardDiff.jacobian((du_ode, locs) -> begin
                             equations_inner = equations
-                            source_terms_inner = (u, x, t, equations) -> source_terms_all(u, x, t, equations, locs)
+                            source_terms_inner = source_terms_manning_plus_turbines
 
                             semi_inner = Trixi.remake(semi, 
                                 source_terms = source_terms_inner,
@@ -380,5 +390,5 @@ J = ForwardDiff.jacobian((du_ode, locs) -> begin
                                 uEltype = eltype(locs)
                                 )
                              Trixi.rhs!(du_ode, u0_ode, semi_inner, 0.0)
-                         end, similar(u0_ode), [1.0, 1.0]); 
-##
+                         end, similar(u0_ode), [11.0, 4.0]); 
+
