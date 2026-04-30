@@ -1,8 +1,8 @@
 # This file is machine-generated - editing it directly is not advised
 
-julia_version = "1.12.6"
+julia_version = "1.12.4"
 manifest_format = "2.0"
-project_hash = "6396a701a76ed41d8e3897f01ef4eeb1281223fa"
+project_hash = "90eecb34fb8e63d6a31972c42f0ba5696cb7b795"
 
 [[deps.ADTypes]]
 git-tree-sha1 = "f7304359109c768cf32dc5fa2d371565bb63b68a"
@@ -2418,7 +2418,7 @@ uuid = "8290d209-cae3-49c0-8002-c8c24d57dab5"
 version = "0.5.5"
 
 [[deps.TidalTurbines]]
-deps = ["CairoMakie", "HOHQMesh", "OrdinaryDiffEqSSPRK", "Trixi", "TrixiBottomTopography", "TrixiShallowWater"]
+deps = ["CairoMakie", "HOHQMesh", "OrdinaryDiffEqSSPRK", "Trixi", "Trixi2Vtk", "TrixiBottomTopography", "TrixiShallowWater"]
 path = "."
 uuid = "c76bb1d2-eee4-4fb3-a690-55bfa31cf500"
 version = "1.0.0-DEV"
