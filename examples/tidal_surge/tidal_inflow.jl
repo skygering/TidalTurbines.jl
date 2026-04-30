@@ -13,14 +13,22 @@ setPolynomialOrder!(tidal, 1)
 setMeshFileFormat!(tidal, "ISM-V2")
 HOHQMesh.getModelDict(tidal)
 
-bounds = [3.402, 0.0, 0.0, 5.488] # [top, left, bottom, right]
+ymin = 0.0
+ymax = 4.0
+xmin = 0.0
+xmax = 20.0
+bounds = [ymax, ymin, xmin, xmax] # [top, left, bottom, right]
 N = [16, 8, 0]
 addBackgroundGrid!(tidal, bounds, N)
 generate_mesh(tidal)
 
 # (2) equations + ICs + BCs
-bathy = FlatBathymetry(-1.0)
-wm = WaveMaker(0.5, 0.005)
+bathy = SlopedBathymetry(ymin, ymax, -1.0, -0.1)
+
+println(bathy(0.0, 0.0))
+println(bathy(3.0, 0.0))
+
+wm = WaveMaker(0.5, 0.05)
 equations = ShallowWaterEquations2D(gravity = 9.81, H0 = 0.0)
 initial_condition = make_initial_condition_tidal_surge(bathy)
 boundary_condition = (;

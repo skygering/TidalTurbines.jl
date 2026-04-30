@@ -22,15 +22,16 @@ end
 # Sloped bathymetry
 # -------------------------
 struct SlopedBathymetry <: AbstractBathymetry
-    x_min::Float64
-    x_max::Float64
+    y_min::Float64
+    y_max::Float64
     b_min::Float64
     b_max::Float64
 end
 
 @inline function (b::SlopedBathymetry)(x, y)
-    ξ = (x - b.x_min) / (b.x_max - b.x_min)
-    return b.b_min + ξ * (b.b_max - b.b_min)
+    ξ = (y - b.y_min) / (b.y_max - b.y_min)
+    shape = 0.5 * (1 - cos(2π * ξ))  # 0 at edges, 1 at center
+    return b.b_max - shape * (b.b_max - b.b_min)
 end
 
 # -------------------------
