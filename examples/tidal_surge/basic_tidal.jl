@@ -23,15 +23,21 @@ addBackgroundGrid!(tidal_flat, bounds, N)
 generate_mesh(tidal_flat);
 
 # (2) construct solver
-equations = ShallowWaterEquations2D(gravity = 9.81, H0 = 25.0)
+equations = ShallowWaterEquations2D(gravity = 9.81, H0 = 0.0)
 
 # (2) boundary boundary conditions
 initial_condition = initial_condition_tidal_surge;
 
-boundary_condition = (; 
-    Left = boundary_condition_tidal_surge,
-    Right = boundary_condition_slip_wall, # TODO: switch to open
-    Top = boundary_condition_slip_wall,
+# boundary_condition = (; 
+#     Left = boundary_condition_tidal_inflow,
+#     Right = boundary_condition_tidal_outflow,
+#     Top = boundary_condition_slip_wall,
+#     Bottom = boundary_condition_slip_wall
+# )
+boundary_condition = (;
+    Left   = boundary_condition_wave_maker_m2,
+    Right  = boundary_condition_outflow_simple,
+    Top    = boundary_condition_slip_wall,
     Bottom = boundary_condition_slip_wall
 )
 
@@ -61,23 +67,24 @@ semi = SemidiscretizationHyperbolic(
     equations,
     initial_condition,
     solver;
-    boundary_conditions = boundary_condition
+    boundary_conditions = boundary_condition,
+    source_terms = source_terms_manning_friction
 )
 
-tspan = (0.0, 1 * 12.42 * 3600)  # 1 tidal cycle
+tspan = (0.0, 0.5 * 12.42 * 3600.0)
 ode = semidiscretize(semi, tspan);
 
-analysis_interval = 200
+analysis_interval = 100
 analysis_callback = AnalysisCallback(semi, interval = analysis_interval)
 
 save_solution = SaveSolutionCallback(
-    dt = 600.0,   # 10 minutes
+    dt = 100.0,   # 10 minutes
     output_directory = "examples/tidal_surge/out",
     save_initial_solution = true,
     save_final_solution = true
 )
 
-stepsize_callback = StepsizeCallback(cfl = 1.2)
+stepsize_callback = StepsizeCallback(cfl = 1)
 
 callbacks = CallbackSet(
     analysis_callback,
@@ -88,10 +95,11 @@ callbacks = CallbackSet(
 stage_limiter! = PositivityPreservingLimiterShallowWater(variables = (waterheight,))
 
 sol = solve(ode, SSPRK43(stage_limiter!);
-          dt = 10.0,
           ode_default_options()...,
           callback = callbacks,
+          dt = 1.0,
           adaptive = false)
+          
 
 trixi2vtk("examples/tidal_surge/out/solution_*.h5",
           output_directory = "examples/tidal_surge/out/vtk")

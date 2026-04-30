@@ -1,51 +1,117 @@
-export initial_condition_tidal_surge, boundary_condition_tidal_surge
+export initial_condition_tidal_surge,
+       WaveMaker,
+       make_initial_condition_tidal_surge,
+       make_boundary_condition_flather_left,
+       make_boundary_condition_flather_right
 
-const T_tide = 12.42 * 3600        # M2 tide period (seconds)
-const ω = 2π / T_tide              # angular frequency
-const A = 1.5                      # meters (adjust per site)
+# -------------------------------------------------------------------
+# Wave maker
+# -------------------------------------------------------------------
 
-@inline function initial_condition_tidal_surge(x, t, equations::ShallowWaterEquations2D)
-    # initially water is at rest
-    v1 = 0.0
-    v2 = 0.0
+struct WaveMaker
+    A::Float64
+    ω::Float64
+end
 
-    # bottom topography values 
+@inline (wm::WaveMaker)(t, eq) = eq.H0 + wm.A * sin(wm.ω * t)
+
+# -------------------------------------------------------------------
+# Initial condition factory
+# -------------------------------------------------------------------
+
+function make_initial_condition_tidal_surge(bathymetry::AbstractBathymetry)
+    return @inline function (x, t, equations::ShallowWaterEquations2D)
+        v1 = 0.0
+        v2 = 0.0
+
+        x1, x2 = x
+        b = bathymetry(x1, x2)
+
+        h = max(equations.threshold_limiter, equations.H0 - b)
+
+        return SVector(h, h * v1, h * v2, b)
+    end
+end
+
+# -------------------------------------------------------------------
+# Boundary condition factories
+# -------------------------------------------------------------------
+
+function make_boundary_condition_flather_left(
+    wm::WaveMaker,
+    bathymetry::AbstractBathymetry
+)
+    return @inline function (u_inner, normal_direction, x, t,
+                             surface_flux_functions,
+                             equations::ShallowWaterEquations2D)
+
+        η_ext = wm(t, equations)
+
+        return boundary_condition_flather(
+            η_ext,
+            u_inner, normal_direction, x, t,
+            surface_flux_functions, equations,
+            bathymetry
+        )
+    end
+end
+
+
+function make_boundary_condition_flather_right(
+    bathymetry::AbstractBathymetry
+)
+    return @inline function (u_inner, normal_direction, x, t,
+                             surface_flux_functions,
+                             equations::ShallowWaterEquations2D)
+
+        return boundary_condition_flather(
+            equations.H0,
+            u_inner, normal_direction, x, t,
+            surface_flux_functions, equations,
+            bathymetry
+        )
+    end
+end
+
+# -------------------------------------------------------------------
+# Core Flather condition
+# -------------------------------------------------------------------
+
+@inline function boundary_condition_flather(η_ext,
+    u_inner, normal_direction, x, t,
+    surface_flux_functions,
+    equations::ShallowWaterEquations2D,
+    bathymetry::AbstractBathymetry
+)
+    sf, ncf = surface_flux_functions
+
+    h, hv1, hv2, b_inner = u_inner
+    nx, ny = normal_direction
+
+    # recompute bathymetry at boundary location
     x1, x2 = x
-    b = flat_bathymetry(x1, x2) # TODO: make this modular!
+    b = bathymetry(x1, x2)
 
-    # shift the water level at dry areas to make sure the water height h stays positive.
-    h = max(equations.threshold_limiter, equations.H0 - b)
+    hsafe = max(h, 1e-6)
 
-    # Return the conservative variables
-    return SVector(h, h * v1, h * v2, b)
-end
+    v1 = hv1 / hsafe
+    v2 = hv2 / hsafe
+    vn = v1 * nx + v2 * ny
 
-@inline function tidal_elevation(t)
-    return A * sin(ω * t)
-end
+    η_inner = h + b_inner
+    h_ext = max(equations.threshold_limiter, η_ext - b)
 
-@inline function boundary_condition_tidal_surge(u_inner, normal_direction,
-                                         x, t, surface_flux_functions,
-                                         equations::ShallowWaterEquations2D)
+    c = sqrt(equations.gravity / hsafe)
+    vn_ext = vn + c * (η_inner - η_ext)
 
-    surface_flux_function, nonconservative_flux_function = surface_flux_functions
+    tx, ty = -ny, nx
+    vt = v1 * tx + v2 * ty
 
-    # water height from tidal elevation
-    b = u_inner[4]
-    h_ext = max(equations.threshold_limiter, equations.H0 + tidal_elevation(t) - b)
+    v1o = vn_ext * nx + vt * tx
+    v2o = vn_ext * ny + vt * ty
 
-    # assumtions:
-    # (1) shallow water velocity from dispersion relation is v = √(gh)
-    # (2) velocity aligned with boundary normal
-    v_normal = sqrt(equations.gravity * h_ext)
+    u_outer = SVector(h_ext, h_ext * v1o, h_ext * v2o, b)
 
-    u_outer = SVector(h_ext,
-                      h_ext * v_normal * normal_direction[1],
-                      h_ext * v_normal * normal_direction[2],
-                      b)
-
-    flux = surface_flux_function(u_inner, u_outer, normal_direction, equations)
-    noncons_flux = nonconservative_flux_function(u_inner, u_outer, normal_direction, equations)
-
-    return flux, noncons_flux
+    return sf(u_inner, u_outer, normal_direction, equations),
+           ncf(u_inner, u_outer, normal_direction, equations)
 end
