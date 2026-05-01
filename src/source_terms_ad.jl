@@ -39,25 +39,46 @@ const XI_BUMP = 1.45661
 # -------------------------------------------------------------------
 # Smooth step function
 # -------------------------------------------------------------------
+# @inline function smoothstep(s)
+#     if s <= 0
+#         return 0.0
+#     elseif s >= 1
+#         return 1.0
+#     else
+#         return s^2 * (3 - 2s)
+#     end
+# end
+
 @inline function smoothstep(s)
-    if s <= 0
-        return 0.0
-    elseif s >= 1
-        return 1.0
+    T = typeof(s)
+    if s <= zero(T)
+        return zero(T)
+    elseif s >= one(T)
+        return one(T)
     else
-        return s^2 * (3 - 2s)
+        return s^2 * (T(3) - T(2) * s)
     end
 end
 
 # -------------------------------------------------------------------
 # Bump function for turbine footprint
 # -------------------------------------------------------------------
+# @inline function bump_1d(x, p, r)
+#     ξ = (x - p) / r
+#     if abs(ξ) < 1
+#         return exp(1 - 1 / (1 - ξ^2))
+#     else
+#         return zero(x)
+#     end
+# end
+
 @inline function bump_1d(x, p, r)
     ξ = (x - p) / r
-    if abs(ξ) < 1
-        return exp(1 - 1 / (1 - ξ^2))
+    T = typeof(ξ)
+    if abs(ξ) < one(T)
+        return exp(one(T) - one(T) / (one(T) - ξ^2))
     else
-        return zero(x)
+        return zero(T)
     end
 end
 
@@ -220,13 +241,24 @@ end
     h, hv_1, hv_2, _ = u
 
     h_eff = max(h, equations.threshold_limiter)
-    if h_eff <= turb.h_min
-        return 0.0
-    end
+
+    # if h_eff <= turb.h_min
+    #     return 0.0
+    # end
+    # if dA <= 0
+    #     return 0.0
+    # end
 
     dA = turbine_density_single(x, turb)
-    if dA <= 0
-        return 0.0
+    T = eltype(u)
+    zero_T = zero(T)
+
+    if h_eff <= turb.h_min
+        return zero_T
+    end
+
+    if dA <= zero_T
+        return zero_T
     end
 
     v1 = hv_1 / h_eff
@@ -234,9 +266,11 @@ end
     U  = sqrt(v1^2 + v2^2)
 
     Cp = Cp_turbine(U, turb)
-    At = 0.25 * pi * turb.D^2
-    # print("  turbine at (", turb.x0, ", ", turb.y0, "): U = ", U, " m/s, Cp = ", Cp)
-    return 0.5 * rho * Cp * At * dA * U^3
+    # At = 0.25 * pi * turb.D^2
+    # # print("  turbine at (", turb.x0, ", ", turb.y0, "): U = ", U, " m/s, Cp = ", Cp)
+    # return 0.5 * rho * Cp * At * dA * U^3
+    At = T(0.25) * T(pi) * turb.D^2
+    return T(0.5) * T(rho) * Cp * At * dA * U^3
 end
 
 @inline function turbine_power_density_total(u, x, equations, turbines; rho = 1000.0)

@@ -284,9 +284,9 @@ end
     return p
 end
 
-semi = SemidiscretizationHyperbolic(mesh, equations, initial_condition, solver;
-                                    boundary_conditions = boundary_condition,
-                                    source_terms = source_terms_manning_plus_turbines);
+# semi = SemidiscretizationHyperbolic(mesh, equations, initial_condition, solver;
+#                                     boundary_conditions = boundary_condition,
+#                                     source_terms = source_terms_manning_plus_turbines);
 
 # U = 0:0.01:5.5
 # turb = turbines[1]
