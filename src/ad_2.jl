@@ -1,3 +1,16 @@
+using HOHQMesh
+using OrdinaryDiffEqSSPRK
+using Trixi
+using TrixiShallowWater
+using TrixiBottomTopography
+using CairoMakie
+using Trixi2Vtk
+
+include("bathymetry.jl")
+include("boundary_conditions.jl")
+include("source_terms_ad.jl")
+include("power_output_ad.jl")
+
 function build_base_simulation()
     equations = ShallowWaterEquations2D(gravity = 9.81, H0 = 0.0)
 
@@ -114,7 +127,9 @@ function objective(p, base; tspan = (0.0, 22.5), saveat = 0.05, rho = 1000.0)
                                             dt = 0.05,
                                             rho = 1000.0)
     stepsize_callback = StepsizeCallback(cfl = 0.6)
-    callbacks = CallbackSet(stepsize_callback)
+    callbacks = CallbackSet()
+    # callbacks = CallbackSet(stepsize_callback)
+
 
     # ======================= Just for debug =======================
 
@@ -153,16 +168,13 @@ function objective(p, base; tspan = (0.0, 22.5), saveat = 0.05, rho = 1000.0)
     return -E
 end
 
-include("bathymetry.jl")
-include("boundary_conditions.jl")
-include("source_terms_ad.jl")
-include("power_output_ad.jl")
+
 
 base = build_base_simulation()
 
 p0 = [3.80, 1.70]
 
-J0 = objective(p0, base; tspan = (0.0, 22.5), saveat = 0.05)
+J0 = objective(p0, base; tspan = (0.0, 1), saveat = 0.05)
 
 println("objective(p0) = ", J0)
 

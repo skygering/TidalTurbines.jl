@@ -281,7 +281,4 @@ end
     return p_total
 end
 
-semi = SemidiscretizationHyperbolic(mesh, equations, initial_condition, solver;
-                                    boundary_conditions = boundary_condition,
-                                    source_terms = source_terms_manning_plus_turbines);
 
