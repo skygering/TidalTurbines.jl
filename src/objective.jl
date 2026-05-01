@@ -119,57 +119,17 @@ function objective(p, base; tspan = (0.0, 22.5), saveat = 0.05, rho = 1000.0)
     semi, turbines = build_semi(p, base)
     ode = semidiscretize(semi, tspan)
 
-    # ======================= Just for debug =======================
-    analysis_interval = 1000
-    analysis_callback = AnalysisCallback(semi, interval = analysis_interval)
-
-    power_callback = SimplePowerOutputCallback(semi, turbines;
-                                            filename = "out/turbine_power.csv",
-                                            dt = 0.05,
-                                            rho = 1000.0)
-    stepsize_callback = StepsizeCallback(cfl = 0.6)
     callbacks = CallbackSet()
-    # callbacks = CallbackSet(stepsize_callback)
 
-
-    # ======================= Just for debug =======================
-
-    stepsize_callback = StepsizeCallback(cfl = 0.6)
     stage_limiter! = PositivityPreservingLimiterShallowWater(variables = (waterheight,))
 
     sol = solve(ode, SSPRK43(stage_limiter!); dt = 1.0,
           ode_default_options()..., callback = callbacks, adaptive = false, saveat = saveat, save_everystep = false);
-
-    # # just for debug, not adaptive
-    # callbacks = CallbackSet(analysis_callback,
-    #                         stepsize_callback,
-    #                         save_solution,
-    #                         power_callback);
-    # sol2 = solve(ode, SSPRK43(stage_limiter!); dt = 1.0,
-    #       ode_default_options()..., callback = callbacks, adaptive = false);
-    # ######
-
-    # println(sol.t == sol2.t)
-
-    # sol = solve(
-    #     ode,
-    #     SSPRK43(stage_limiter!);
-    #     dt = 1.0,
-    #     adaptive = false,
-    #     # saveat = saveat,
-    #     callback = stepsize_callback,
-    #     ode_default_options()...
-    # )
-
-    # E2, _ = compute_total_turbine_energy(sol2, semi, turbines; rho = rho)
-    # println("E = ", E, ", E2 = ", E2)
     
     E, _ = compute_total_turbine_energy(sol, semi, turbines; rho = rho)
-    
+    # E = zero(eltype(p))
     return -E
 end
-
-
 
 base = build_base_simulation()
 
