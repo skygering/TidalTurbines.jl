@@ -1,4 +1,49 @@
-export source_terms_manning_friction
+export combine_source_terms, make_sponge_source, source_terms_manning_friction
+
+function combine_source_terms(source_terms::Vector)
+
+    return @inline function combined_source(u, x, t, equations)
+
+        S = source_terms[1](u, x, t, equations)
+
+        for i in 2:length(source_terms)
+            S += source_terms[i](u, x, t, equations)
+        end
+
+        return S
+    end
+end
+
+function sponge_strength(x, y; Lx, σ_max)
+
+    xnorm = x / Lx
+
+    if xnorm < 0.1
+        return σ_max * (1 - xnorm / 0.1)
+    elseif xnorm > 0.9
+        return σ_max * (1 - (1 - xnorm) / 0.1)
+    else
+        return 0.0
+    end
+end
+
+function make_sponge_source(; Lx, σ_max=2.0)
+
+    return @inline function source_sponge(u, x, t, equations::ShallowWaterEquations2D)
+
+        h, hv1, hv2, b = u
+        x1, x2 = x
+
+        σ = sponge_strength(x1, x2; Lx=Lx, σ_max=σ_max)
+
+        return SVector(
+            zero(eltype(x)),   # mass
+            -σ * hv1,          # momentum x
+            -σ * hv2,          # momentum y
+            zero(eltype(x))    # bathymetry
+        )
+    end
+end
 
 @inline function source_terms_manning_friction(u, x, t, equations::ShallowWaterEquations2D)
     h, hv_1, hv_2, _ = u

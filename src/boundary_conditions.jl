@@ -1,6 +1,7 @@
 export initial_condition_tidal_surge,
        WaveMaker,
        make_initial_condition_tidal_surge,
+       make_dirichlet_state,
        make_boundary_condition_flather_left,
        make_boundary_condition_flather_right
 
@@ -37,6 +38,26 @@ end
 # Boundary condition factories
 # -------------------------------------------------------------------
 
+function make_dirichlet_state(η_func, bathymetry)
+    return @inline function (x, t, equations::ShallowWaterEquations2D)
+
+        x1, x2 = x
+        b = bathymetry(x1, x2)
+
+        η = η_func(t, equations)
+
+        # reconstruct water depth
+        h = max(equations.threshold_limiter, η - b)
+
+        # velocity choice
+        v1 = 0.0
+        v2 = 0.0
+
+        return SVector(h, h*v1, h*v2, b)
+    end
+end
+
+
 function make_boundary_condition_flather_left(
     wm::WaveMaker,
     bathymetry::AbstractBathymetry
@@ -57,21 +78,21 @@ function make_boundary_condition_flather_left(
 end
 
 
-function make_boundary_condition_flather_right(
-    bathymetry::AbstractBathymetry
-)
-    return @inline function (u_inner, normal_direction, x, t,
-                             surface_flux_functions,
-                             equations::ShallowWaterEquations2D)
+# function make_boundary_condition_flather_right(
+#     bathymetry::AbstractBathymetry
+# )
+#     return @inline function (u_inner, normal_direction, x, t,
+#                              surface_flux_functions,
+#                              equations::ShallowWaterEquations2D)
 
-        return boundary_condition_flather(
-            equations.H0,
-            u_inner, normal_direction, x, t,
-            surface_flux_functions, equations,
-            bathymetry
-        )
-    end
-end
+#         return boundary_condition_flather(
+#             equations.H0,
+#             u_inner, normal_direction, x, t,
+#             surface_flux_functions, equations,
+#             bathymetry
+#         )
+#     end
+# end
 
 # -------------------------------------------------------------------
 # Core Flather condition

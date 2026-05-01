@@ -1,7 +1,8 @@
 export AbstractBathymetry,
        FlatBathymetry,
        SlopedBathymetry,
-       SplineBathymetry
+       SplineBathymetry,
+       HeadlandBathymetry
 
 # -------------------------------------------------------------------
 # Bathymetry hierarchy
@@ -43,3 +44,25 @@ end
 
 @inline (b::SplineBathymetry)(x, y) =
     spline_interpolation(b.spline_struct, x, y)
+
+struct HeadlandBathymetry <: AbstractBathymetry
+    x0::Float64
+    y0::Float64
+    r0::Float64
+    h0::Float64
+    hshore::Float64
+end
+
+# -------------------------
+# Headland bathymetry
+# -------------------------
+# h0: base depth (channel)
+# hshore: shallow shore near headland (5 m)
+@inline function (b::HeadlandBathymetry)(x, y)
+    r = sqrt((x - b.x0)^2 + (y - b.y0)^2)
+
+    # smooth transition over headland radius
+    s = clamp((r - b.r0) / b.r0, 0.0, 1.0)
+
+    return b.hshore + (b.h0 - b.hshore) * s
+end
