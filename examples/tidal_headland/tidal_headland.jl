@@ -13,14 +13,18 @@ Journal of Ocean Engineering and Marine Energy (2022)
 
 https://link.springer.com/article/10.1007/s40722-022-00225-2
 =#
+output_directory = "examples/tidal_headland/out"
+rm(output_directory, recursive=true, force=true)
+mkpath(output_directory)
 
-rm("examples/tidal_headland/out", recursive=true, force=true)
-mkpath("examples/tidal_headland/out")
+output_directory_w_turbines = "examples/tidal_headland/out_w_turbines"
+rm(output_directory_w_turbines, recursive=true, force=true)
+mkpath(output_directory_w_turbines)
 
 # problem setup + non_dimensionalization
 
 g = 9.81 # m/s^2
-D = 40   # m
+D = 30   # m
 
 # domain values
 Lx = 1280 / D
@@ -36,20 +40,23 @@ T = 60 * 60 * sqrt(g / D)
 Aₜ = 0.275 / D
 
 # turbine values
-uᵣ = 3 / sqrt(D * g) # approx rated velocity
+u_in = 1 / sqrt(D * g) # cut-in speed
+u_rated = 3 / sqrt(D * g) # approx rated velocity
+u_out = 5 / sqrt(D * g) # cut-in speed
+h_min = 0.02 / D
 
 # sponge layer strength σ [1/s]
-# time scale: t ~ L_sponge / uᵣ [s]
+# time scale: t ~ L_sponge / u_rated [s]
 # non-dimensional control paaram: tσ ~5 is good absorbing layer
-σₘ = 1 * uᵣ / Lₛ
+σₘ = 1 * u_rated / Lₛ
 
 # solver time values
 t_out = round(Int, T / 10)
 Δt = 0.5 * sqrt(g / D)
-tspan = (0.0, T)
+tspan = (0.0, 0.25 * T)
 
 # (1) create mesh
-tidal = newProject("flat_tidal", "examples/tidal_headland")
+tidal = newProject("tidal_headland", "examples/tidal_headland")
 setPolynomialOrder!(tidal, 1)
 setMeshFileFormat!(tidal, "ISM-V2")
 HOHQMesh.getModelDict(tidal)
@@ -79,12 +86,20 @@ boundary_condition = (;
     Right  = bc_right,
 )
 
-# (3) extra source terms
-sponge = make_sponge_source(; Lx, σ_max=σₘ)
-friction = source_terms_manning_friction
-source_terms = combine_source_terms([sponge, friction])
+# (3) make turbines
+make_turbines(p) = [Turbine(; x0 = p[1], y0 = p[2], u_rated,  u_in, u_out, h_min) for p in p_list]
+turbines = make_turbines([(Lx / 2, α * Ly) for α in LinRange(0.175, 0.425, 3)])
+# turbines = [Turbine(; x0 = Lx / 2, y0 = α * Ly, u_rated, u_in, u_out, h_min) for α in LinRange(0.175, 0.425, 3)]
 
-# (4) solver
+# (4) extra source terms
+sponge_source = make_sponge_source(; Lx, σ_max=σₘ)
+friction_source = source_terms_manning_friction
+turbine_source = make_turbine_source(turbines)
+
+source_terms = combine_source_terms([sponge_source, friction_source])
+source_terms_w_turbine = combine_source_terms([sponge_source, friction_source, turbine_source])
+
+# (5) solver
 surface_flux = (
     FluxHydrostaticReconstruction(flux_hll_chen_noelle, hydrostatic_reconstruction_chen_noelle),
     flux_nonconservative_chen_noelle,
@@ -108,36 +123,90 @@ volume_integral = VolumeIntegralShockCapturingHG(
 
 solver = DGSEM(basis, surface_flux, volume_integral)
 
-mesh_file = joinpath(@__DIR__, "flat_tidal.mesh")
+mesh_file = joinpath(@__DIR__, "tidal_headland.mesh")
 mesh = UnstructuredMesh2D(mesh_file)
 semi = SemidiscretizationHyperbolic(
     mesh, equations, initial_condition, solver;
     boundary_conditions = boundary_condition,
     source_terms = source_terms
 )
+semi_w_turbines = SemidiscretizationHyperbolic(
+    mesh, equations, initial_condition, solver;
+    boundary_conditions = boundary_condition,
+    source_terms = source_terms_w_turbine
+)
 
-# (5) time integration
+# (6) time integration
 ode = semidiscretize(semi, tspan)
+ode_w_turbines = semidiscretize(semi_w_turbines, tspan)
 
-# (6) output setput
+# (7) output setput
 analysis_callback = AnalysisCallback(semi, interval = t_out)
+analysis_callback_w_turbines = AnalysisCallback(semi_w_turbines, interval = t_out)
+
 save_solution = SaveSolutionCallback(
     dt = 10 * Δt,
-    output_directory = "examples/tidal_headland/out",
+    output_directory = output_directory,
     save_initial_solution = true,
-    save_final_solution = true
+    save_final_solution = true,
 )
-stepsize_callback = StepsizeCallback(cfl = 0.3)
-callbacks = CallbackSet(analysis_callback, stepsize_callback, save_solution)
 
-# (6) solve!
+save_solution_w_turbines = SaveSolutionCallback(
+    dt = 10 * Δt,
+    output_directory = output_directory_w_turbines,
+    save_initial_solution = true,
+    save_final_solution = true,
+)
+
+stepsize_callback = StepsizeCallback(cfl = 0.3)
+
+callbacks = CallbackSet(analysis_callback, stepsize_callback, save_solution)
+callbacks_w_turbine = CallbackSet(analysis_callback_w_turbines, stepsize_callback, save_solution_w_turbines)
+
+# (8) solve!
 stage_limiter! = PositivityPreservingLimiterShallowWater(variables = (waterheight,))
+
 sol = solve(ode, SSPRK43(stage_limiter!);
             dt = Δt,
             ode_default_options()...,
             callback = callbacks,
             adaptive = false)
 
-# (7) transform outputs for paraview           
-trixi2vtk("examples/tidal_headland/out/solution_*.h5",
-          output_directory = "examples/tidal_headland/out/vtk")
+sol_w_turbines = solve(ode_w_turbines, SSPRK43(stage_limiter!);
+            dt = Δt,
+            ode_default_options()...,
+            callback = callbacks_w_turbine,
+            adaptive = false)
+cp(joinpath(output_directory, "mesh.h5"), joinpath(output_directory_w_turbines, "mesh.h5"); force=true)
+
+
+# (9) re-dimensionalize outputs for paraview 
+dim_output_directory = "examples/tidal_headland/dimensional_out"
+rm(dim_output_directory, recursive=true, force=true)
+mkpath(dim_output_directory)
+snapshots = load_all_snapshots(output_directory)
+dimensionalized_snapshots = dimensionalize.(snapshots)
+export_all_snapshots(dimensionalized_snapshots, dim_output_directory)         
+
+dim_output_directory_w_turbines = "examples/tidal_headland/dimensional_out_w_turbines"
+rm(dim_output_directory_w_turbines, recursive=true, force=true)
+mkpath(dim_output_directory_w_turbines)
+snapshots_w_turbines = load_all_snapshots(output_directory_w_turbines)
+dimensionalized_snapshots_w_turbines = dimensionalize.(snapshots_w_turbines)
+export_all_snapshots(dimensionalized_snapshots_w_turbines, dim_output_directory_w_turbines) 
+
+dim_output_directory_diff = "examples/tidal_headland/dimensional_out_diffs"
+rm(dim_output_directory_diff, recursive=true, force=true)
+mkpath(dim_output_directory_diff)
+diffs = snapshot_differences(dimensionalized_snapshots, dimensionalized_snapshots_w_turbines)
+export_all_snapshots(diffs, dim_output_directory_diff)
+
+
+trixi2vtk(joinpath(dim_output_directory, "solution_*.h5"),
+          output_directory = joinpath(dim_output_directory, "vtk"))
+
+trixi2vtk(joinpath(dim_output_directory_w_turbines, "solution_*.h5"),
+          output_directory = joinpath(dim_output_directory_w_turbines, "vtk"))
+
+trixi2vtk(joinpath(dim_output_directory_diff, "solution_*.h5"),
+          output_directory = joinpath(dim_output_directory_diff, "vtk"))
