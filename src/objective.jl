@@ -121,6 +121,13 @@ function objective(p, base; tspan = (0.0, 22.5), saveat = 0.05, rho = 1000.0)
 
     callbacks = CallbackSet()
 
+    # power_callback = SimplePowerOutputCallback(semi, turbines;
+    #                                        filename = "out/turbine_power.csv",
+    #                                        dt = 0.05,
+    #                                        rho = 1000.0)
+
+    # callbacks = CallbackSet(power_callback);
+
     stage_limiter! = PositivityPreservingLimiterShallowWater(variables = (waterheight,))
 
     sol = solve(ode, SSPRK43(stage_limiter!); dt = 1.0,

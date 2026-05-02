@@ -38,7 +38,6 @@ function compute_total_turbine_energy(sol, semi, turbines; rho = 1000.0)
         P_hist[k] = P_total
     end
 
-    # E = 0.0
     for k in 2:nt
         dt = sol.t[k] - sol.t[k - 1]
         E += 0.5 * (P_hist[k] + P_hist[k - 1]) * dt
