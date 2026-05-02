@@ -4,12 +4,13 @@ struct Turbine{T}
     x0::T
     y0::T
     r_support::T
-    Cₜ_rated::T
-    Cₚ_rated::T
+    Ct_rated::T
+    Cp_rated::T
     u_in::T
     u_rated::T
     u_out::T
     h_min::T
+    D::T
 end
 
 # -------------------------------------------------------------------
@@ -19,22 +20,23 @@ function Turbine(;
     x0, y0,
     u_in, u_rated, u_out,
     r_support = 0.15,
-    Cₜ_rated = 0.516,
-    Cₚ_rated = nothing,
-    h_min = 0.0
+    Ct_rated = 0.516,
+    Cp_rated = nothing,
+    h_min = 0.0,
+    D = 1.0,
 )
-    if isnothing(Cₚ_rated)
-        Cₚ_rated = Cp_from_Ct(Cₜ_rated)
+    if isnothing(Cp_rated)
+        Cp_rated = Cp_from_Ct(Ct_rated)
     end
     T = promote_type(typeof(x0), typeof(y0), typeof(r_support),
-                     typeof(Cₜ_rated), typeof(Cₚ_rated),
+                     typeof(Ct_rated), typeof(Cp_rated),
                      typeof(u_in), typeof(u_rated),
-                     typeof(u_out), typeof(h_min))
+                     typeof(u_out), typeof(h_min), typeof(D))
 
     return Turbine{T}(T(x0), T(y0), T(r_support),
-                      T(Cₜ_rated), T(Cₚ_rated),
+                      T(Ct_rated), T(Cp_rated),
                       T(u_in), T(u_rated),
-                      T(u_out), T(h_min))
+                      T(u_out), T(h_min), T(D))
 end
 
 # -------------------------------------------------------------------

@@ -1,15 +1,8 @@
 using HOHQMesh
 using OrdinaryDiffEqSSPRK
-using Trixi
-using TrixiShallowWater
-using TrixiBottomTopography
 using CairoMakie
 using Trixi2Vtk
-
-include("bathymetry.jl")
-include("boundary_conditions.jl")
-include("source_terms_ad.jl")
-include("power_output_ad.jl")
+using TidalTurbines
 
 function build_base_simulation()
     equations = ShallowWaterEquations2D(gravity = 9.81, H0 = 0.0)

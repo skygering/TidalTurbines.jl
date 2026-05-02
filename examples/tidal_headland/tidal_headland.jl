@@ -24,14 +24,14 @@ mkpath(output_directory_w_turbines)
 # problem setup + non_dimensionalization
 
 g = 9.81 # m/s^2
-D = 30   # m
+D = 20 # m
 
 # domain values
 Lx = 1280 / D
 Ly = 480 / D
 Lₛ = 0.1 * Lx # sponge layer length
 H₀ = -50 / D # bathymetry depth
-Hₛ = -5 / D # headland/shelf depth
+Hₛ = 5 / D # headland/shelf depth
 Rₛ = 160 / D # headland/shelf radius
 
 # tidal values
@@ -53,7 +53,7 @@ h_min = 0.02 / D
 # solver time values
 t_out = round(Int, T / 10)
 Δt = 0.5 * sqrt(g / D)
-tspan = (0.0, 0.25 * T)
+tspan = (0.0, 2.5 * T)
 
 # (1) create mesh
 tidal = newProject("tidal_headland", "examples/tidal_headland")
@@ -87,9 +87,7 @@ boundary_condition = (;
 )
 
 # (3) make turbines
-make_turbines(p) = [Turbine(; x0 = p[1], y0 = p[2], u_rated,  u_in, u_out, h_min) for p in p_list]
-turbines = make_turbines([(Lx / 2, α * Ly) for α in LinRange(0.175, 0.425, 3)])
-# turbines = [Turbine(; x0 = Lx / 2, y0 = α * Ly, u_rated, u_in, u_out, h_min) for α in LinRange(0.175, 0.425, 3)]
+turbines = [Turbine(; x0 = Lx / 2, y0 = α * Ly, u_rated, u_in, u_out, h_min) for α in LinRange(0.175, 0.425, 3)]
 
 # (4) extra source terms
 sponge_source = make_sponge_source(; Lx, σ_max=σₘ)
@@ -147,7 +145,7 @@ analysis_callback_w_turbines = AnalysisCallback(semi_w_turbines, interval = t_ou
 save_solution = SaveSolutionCallback(
     dt = 10 * Δt,
     output_directory = output_directory,
-    save_initial_solution = true,
+    save_initial_solution = false,
     save_final_solution = true,
 )
 
@@ -181,32 +179,39 @@ cp(joinpath(output_directory, "mesh.h5"), joinpath(output_directory_w_turbines, 
 
 
 # (9) re-dimensionalize outputs for paraview 
-dim_output_directory = "examples/tidal_headland/dimensional_out"
-rm(dim_output_directory, recursive=true, force=true)
-mkpath(dim_output_directory)
+rm(output_directory_diff, recursive=true, force=true)
+mkpath(output_directory_diff)
 snapshots = load_all_snapshots(output_directory)
-dimensionalized_snapshots = dimensionalize.(snapshots)
-export_all_snapshots(dimensionalized_snapshots, dim_output_directory)         
-
-dim_output_directory_w_turbines = "examples/tidal_headland/dimensional_out_w_turbines"
-rm(dim_output_directory_w_turbines, recursive=true, force=true)
-mkpath(dim_output_directory_w_turbines)
 snapshots_w_turbines = load_all_snapshots(output_directory_w_turbines)
-dimensionalized_snapshots_w_turbines = dimensionalize.(snapshots_w_turbines)
-export_all_snapshots(dimensionalized_snapshots_w_turbines, dim_output_directory_w_turbines) 
 
-dim_output_directory_diff = "examples/tidal_headland/dimensional_out_diffs"
-rm(dim_output_directory_diff, recursive=true, force=true)
-mkpath(dim_output_directory_diff)
-diffs = snapshot_differences(dimensionalized_snapshots, dimensionalized_snapshots_w_turbines)
-export_all_snapshots(diffs, dim_output_directory_diff)
+# dim_output_directory = "examples/tidal_headland/dimensional_out"
+# rm(dim_output_directory, recursive=true, force=true)
+# mkpath(dim_output_directory)
+# snapshots = load_all_snapshots(output_directory)
+# dimensionalized_snapshots = dimensionalize.(snapshots)
+# export_all_snapshots(dimensionalized_snapshots, dim_output_directory)         
 
+# dim_output_directory_w_turbines = "examples/tidal_headland/dimensional_out_w_turbines"
+# rm(dim_output_directory_w_turbines, recursive=true, force=true)
+# mkpath(dim_output_directory_w_turbines)
+# snapshots_w_turbines = load_all_snapshots(output_directory_w_turbines)
+# dimensionalized_snapshots_w_turbines = dimensionalize.(snapshots_w_turbines)
+# export_all_snapshots(dimensionalized_snapshots_w_turbines, dim_output_directory_w_turbines) 
 
-trixi2vtk(joinpath(dim_output_directory, "solution_*.h5"),
-          output_directory = joinpath(dim_output_directory, "vtk"))
+output_directory_diff = "examples/tidal_headland/out_diffs"
+rm(output_directory_diff, recursive=true, force=true)
+mkpath(output_directory_diff)
+diffs = snapshot_differences(snapshots, snapshots_w_turbines)
+export_all_snapshots(diffs, output_directory_diff)
 
-trixi2vtk(joinpath(dim_output_directory_w_turbines, "solution_*.h5"),
-          output_directory = joinpath(dim_output_directory_w_turbines, "vtk"))
+trixi2vtk(joinpath(output_directory_diff, "solution_*.h5"),
+          output_directory = joinpath(output_directory_diff, "vtk"))
 
-trixi2vtk(joinpath(dim_output_directory_diff, "solution_*.h5"),
-          output_directory = joinpath(dim_output_directory_diff, "vtk"))
+trixi2vtk(joinpath(output_directory_w_turbines, "solution_*.h5"),
+          output_directory = joinpath(output_directory_w_turbines, "vtk"))
+
+# trixi2vtk(joinpath(dim_output_directory_w_turbines, "solution_*.h5"),
+#           output_directory = joinpath(dim_output_directory_w_turbines, "vtk"))
+
+# trixi2vtk(joinpath(dim_output_directory_diff, "solution_*.h5"),
+#           output_directory = joinpath(dim_output_directory_diff, "vtk"))

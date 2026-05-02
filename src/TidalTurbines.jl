@@ -9,5 +9,6 @@ include("bathymetry.jl")
 include("boundary_conditions.jl")
 include("turbines.jl")
 include("source_terms.jl")
+include("power_output_ad.jl")
 include("post_processing.jl")
 end
