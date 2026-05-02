@@ -1,3 +1,5 @@
+export compute_total_turbine_energy
+
 function compute_turbine_powers(semi, u_ode, turbines; rho = 1000.0)
     solver    = semi.solver
     equations = semi.equations
@@ -168,14 +170,3 @@ function SimplePowerOutputCallback(semi, turbines;
 
     return DiscreteCallback(condition, affect!; save_positions = (false, false))
 end
-
-# create callback here
-# power_callback = SimplePowerOutputCallback(semi, turbines;
-#                                            filename = "out/turbine_power.csv",
-#                                            dt = 0.05,
-#                                            rho = 1000.0)
-
-# callbacks = CallbackSet(analysis_callback,
-#                         stepsize_callback,
-#                         save_solution,
-#                         power_callback);
