@@ -5,21 +5,31 @@ authors = ["Skylar Gering", "Quinn Early", "and Weixuan Li"]
 
 [deps]
 CairoMakie = "13f3f980-e62b-5c42-98c6-ff1f3baf88f0"
+DelimitedFiles = "8bb1440f-4735-579b-a4ab-409b98df4dab"
+HDF5 = "f67ccb44-e63f-5c2f-98bd-6dc0ccc4ba2f"
 HOHQMesh = "e4f4c7b8-17cb-445a-93c5-f69190ed6c8c"
+OrdinaryDiffEq = "1dea7af3-3e70-54e6-95c3-0bf5283fa5ed"
 OrdinaryDiffEqSSPRK = "669c94d9-1f4b-4b64-b377-1aa079aa2388"
+StaticArrays = "90137ffa-7385-5640-81b9-e52037218182"
 Trixi = "a7f1ee26-1774-49b1-8366-f1abc58fbfcb"
 Trixi2Vtk = "bc1476a1-1ca6-4cc3-950b-c312b255ff95"
 TrixiBottomTopography = "86af9953-43df-404b-8eaa-d20d82623a82"
 TrixiShallowWater = "804cb1fc-5b08-4398-a671-a789bfe091b3"
+WriteVTK = "64499a7a-5c06-52f2-abe2-ccb03c286192"
 
 [compat]
 CairoMakie = "0.15.9"
+DelimitedFiles = "1.9.1"
+HDF5 = "0.17.3"
 HOHQMesh = "0.2.10"
+OrdinaryDiffEq = "6.111.0"
 OrdinaryDiffEqSSPRK = "1.14.0"
+StaticArrays = "1.9.18"
 Trixi = "0.16.3"
 Trixi2Vtk = "0.3.31"
 TrixiBottomTopography = "0.1.6"
 TrixiShallowWater = "0.2.7"
+WriteVTK = "1.21.2"
 julia = "1.10.10"
 
 [extras]
