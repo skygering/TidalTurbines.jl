@@ -31,36 +31,35 @@ Lx = 1280 / D
 Ly = 480 / D
 Lₛ = 0.1 * Lx # sponge layer length
 H₀ = -50 / D # bathymetry depth
-Hₛ = 5 / D # headland/shelf depth
+Hₛ = -5 / D # headland/shelf depth
 Rₛ = 160 / D # headland/shelf radius
 
 # tidal values
 T = 60 * 60 * sqrt(g / D)
 ω = 2π / T
-Aₜ = 0.275 / D
+Aₜ = 20 * 0.275 / D
 
 # turbine values
-u_in = 1 / sqrt(D * g) # cut-in speed
+u_in = 0.0 / sqrt(D * g) # cut-in speed
 u_rated = 3 / sqrt(D * g) # approx rated velocity
-u_out = 5 / sqrt(D * g) # cut-in speed
-h_min = 0.02 / D
+u_out = 10 / sqrt(D * g) # cut-in speed
+h_min = 0.00 / D
 
 # sponge layer strength σ [1/s]
 # time scale: t ~ L_sponge / u_rated [s]
 # non-dimensional control paaram: tσ ~5 is good absorbing layer
-σₘ = 1 * u_rated / Lₛ
+σₘ = u_rated / Lₛ
 
 # solver time values
 t_out = round(Int, T / 10)
 Δt = 0.5 * sqrt(g / D)
-tspan = (0.0, 2.5 * T)
+tspan = (0.0, 1 * T)
 
 # (1) create mesh
 tidal = newProject("tidal_headland", "examples/tidal_headland")
 setPolynomialOrder!(tidal, 1)
 setMeshFileFormat!(tidal, "ISM-V2")
 HOHQMesh.getModelDict(tidal)
-
 
 bounds = [Ly, 0.0, 0.0, Lx] # [top, left, bottom, right]
 N = [16, 8, 0]
@@ -70,7 +69,8 @@ generate_mesh(tidal)
 # (2) equations + ICs + BCs
 equations = ShallowWaterEquations2D(gravity = 1.0, H0 = 0.0)
 
-bathy = HeadlandBathymetry(Lx/2, Ly, Rₛ, H₀, Hₛ)
+# bathy = HeadlandBathymetry(Lx/2, Ly, Rₛ, H₀, Hₛ)
+bathy = FlatBathymetry(H₀)
 
 initial_condition = make_initial_condition_tidal_surge(bathy)
 
@@ -179,8 +179,6 @@ cp(joinpath(output_directory, "mesh.h5"), joinpath(output_directory_w_turbines, 
 
 
 # (9) re-dimensionalize outputs for paraview 
-rm(output_directory_diff, recursive=true, force=true)
-mkpath(output_directory_diff)
 snapshots = load_all_snapshots(output_directory)
 snapshots_w_turbines = load_all_snapshots(output_directory_w_turbines)
 
@@ -209,6 +207,9 @@ trixi2vtk(joinpath(output_directory_diff, "solution_*.h5"),
 
 trixi2vtk(joinpath(output_directory_w_turbines, "solution_*.h5"),
           output_directory = joinpath(output_directory_w_turbines, "vtk"))
+
+trixi2vtk(joinpath(output_directory, "solution_*.h5"),
+          output_directory = joinpath(output_directory, "vtk"))
 
 # trixi2vtk(joinpath(dim_output_directory_w_turbines, "solution_*.h5"),
 #           output_directory = joinpath(dim_output_directory_w_turbines, "vtk"))

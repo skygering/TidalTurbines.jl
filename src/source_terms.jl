@@ -1,72 +1,88 @@
-export combine_source_terms, make_sponge_source, source_terms_manning_friction, make_turbine_source
+# export combine_source_terms, make_sponge_source, source_terms_manning_friction, make_turbine_source
+export CombinedSource, SpongeSource, FrictionSource, TurbineFriction
 
-function combine_source_terms(source_terms::Vector)
+abstract type AbstractSourceTerm end
 
-    return @inline function combined_source(u, x, t, equations)
-
-        S = source_terms[1](u, x, t, equations)
-
-        for i in 2:length(source_terms)
-            S += source_terms[i](u, x, t, equations)
-        end
-
-        return S
-    end
+struct CombinedSource{S}
+    sources::S   # tuple of source structs
 end
 
-function sponge_strength(x, y; Lx, σ_max)
+@inline function (cs::CombinedSource)(u, x, t, equations)
+    sources = cs.sources
 
+    S = sources[1](u, x, t, equations)
+
+    @inbounds for i in 2:length(sources)
+        S += sources[i](u, x, t, equations)
+    end
+
+    return S
+end
+
+struct SpongeSource{T} <: AbstractSourceTerm
+    Lx::T
+    σ_max::T
+end
+
+@inline function sponge_strength(x, Lx, σ_max)
     xnorm = x / Lx
-
-    if xnorm < 0.1
-        return σ_max * (1 - xnorm / 0.1)
-    elseif xnorm > 0.9
-        return σ_max * (1 - (1 - xnorm) / 0.1)
-    else
-        return 0.0
-    end
+    left  = max(0.0, 1 - xnorm / 0.1)
+    right = max(0.0, 1 - (1 - xnorm) / 0.1)
+    return σ_max * max(left, right)
 end
 
-function make_sponge_source(; Lx, σ_max=2.0)
+@inline function (s::SpongeSource)(u, x, t, equations)
+    h, hv1, hv2, b = u
+    x1, x2 = x
 
-    return @inline function source_sponge(u, x, t, equations::ShallowWaterEquations2D)
+    σ = sponge_strength(x1, s.Lx, s.σ_max)
 
-        h, hv1, hv2, b = u
-        x1, x2 = x
-
-        σ = sponge_strength(x1, x2; Lx=Lx, σ_max=σ_max)
-
-        return SVector(
-            zero(eltype(x)),   # mass
-            -σ * hv1,          # momentum x
-            -σ * hv2,          # momentum y
-            zero(eltype(x))    # bathymetry
-        )
-    end
+    return SVector(
+        zero(eltype(x)),
+        -σ * hv1,
+        -σ * hv2,
+        zero(eltype(x))
+    )
 end
 
-@inline function source_terms_manning_friction(u, x, t, equations::ShallowWaterEquations2D)
-    h, hv_1, hv_2, _ = u
-
-    n = 0.001
-    h = (h^2 + max(h^2, 1e-8)) / (2 * h)
-
-    Sf = -equations.gravity * n^2 * h^(-7 / 3) * sqrt(hv_1^2 + hv_2^2)
-
-    return SVector(zero(eltype(x)), Sf * hv_1, Sf * hv_2, zero(eltype(x)))
+struct FrictionSource{T} <: AbstractSourceTerm
+    n::T
 end
 
-function make_turbine_source(turbines)
+FrictionSource() = FrictionSource(0.001)
 
-    return @inline function source(u, x, t, equations::ShallowWaterEquations2D)
+@inline function (mf::FrictionSource)(u, x, t, equations::ShallowWaterEquations2D)
+    h, hv1, hv2, _ = u
 
-        return source_terms_turbines(u, x, t, equations, turbines)
-    end
+    g = equations.gravity
+    n2 = mf.n * mf.n
+    h2 = h * h
+
+    # wetting correction
+    h = (h2 + max(h2, 1e-8)) / (2h)
+
+    vel2 = hv1^2 + hv2^2
+    vel  = sqrt(vel2)
+
+    invh = 1 / h
+    hpow = invh^(7/3)
+
+    Sf = -g * n2 * hpow * vel
+
+    return SVector(
+        zero(eltype(u)),
+        Sf * hv1,
+        Sf * hv2,
+        zero(eltype(u))
+    )
 end
 
-@inline function source_terms_turbines(u, x, t,
-                                      equations::ShallowWaterEquations2D,
-                                      turbines::Vector{Turbine{T}}) where T
+struct TurbineFriction{T} <: AbstractSourceTerm
+    turbines::Vector{Turbine{T}}
+end
+
+
+@inline function (tf::TurbineFriction{T})(u, x, t, equations::ShallowWaterEquations2D) where T
     h, hv1, hv2, _ = u
     zero_T = zero(T)
 
@@ -84,7 +100,7 @@ end
     S_hv2 = zero_T
     S_b   = zero_T
 
-    for turb in turbines
+    for turb in tf.turbines
 
         if h_eff <= turb.h_min
             continue

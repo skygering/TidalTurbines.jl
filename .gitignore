@@ -11,5 +11,7 @@
 *.control
 *.mesh
 *.tec
+*.mp4
+*.avi
 
 examples/tsunami/out
