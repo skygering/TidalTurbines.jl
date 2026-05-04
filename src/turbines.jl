@@ -1,4 +1,4 @@
-export Turbine
+export Turbine, turbine_power_density_single, turbine_power_density_total
 
 struct Turbine{T}
     x0::T
@@ -19,7 +19,7 @@ end
 function Turbine(; 
     x0, y0,
     u_in, u_rated, u_out,
-    r_support = 0.15,
+    r_support = 0.50,
     Ct_rated = 0.516,
     Cp_rated = nothing,
     h_min = 0.0,
@@ -104,13 +104,13 @@ end
 # Turbine power density diagnostics
 # -------------------------------------------------------------------
 @inline function turbine_power_density_single(u, x, equations, turb;
-                                              rho = 1000.0)
+                                              rho = 1000.0*20^3)
     h, hv_1, hv_2, _ = u
 
     h_eff = max(h, equations.threshold_limiter)
-    if h_eff <= turb.h_min
-        return 0.0
-    end
+    # if h_eff <= turb.h_min
+    #     return 0.0
+    # end
 
     dA = turbine_density_single(x, turb)
     if dA <= 0

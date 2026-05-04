@@ -86,7 +86,7 @@ Cp = Cp_turbine.(U, Ref(turb))
 end
 
 P = [power_turbine(u, turb) for u in U]
-pl2 = Plots.plot(U, Cp, xlabel="U", ylabel="Power [MW]", label="P(U)", 
+pl2 = Plots.plot(U, P, xlabel="U", ylabel="Power [MW]", label="P(U)", 
     legend=:topleft, lineWidth=2)
 
 display(pl1)

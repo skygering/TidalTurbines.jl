@@ -33,7 +33,7 @@ Rₛ = 160 / D # headland/shelf radius
 # tidal values
 T = 60 * 60 * sqrt(g / D)
 ω = 2π / T
-Aₜ = 0.275 / D
+Aₜ = 0.275 * 10 / D
 
 # turbine values
 u_in = 1 / sqrt(D * g) # cut-in speed
@@ -107,7 +107,7 @@ function build_semi(p_list, base)
     sponge_source = make_sponge_source(; Lx, σ_max=σₘ)
     friction_source = source_terms_manning_friction
     turbine_source = make_turbine_source(turbines)
-    all_source_terms = combine_source_terms([sponge_source, friction_source, turbine_source])
+    all_source_terms = combine_source_terms([friction_source, turbine_source])
 
     semi = SemidiscretizationHyperbolic(
         base.mesh, base.equations, base.initial_condition, base.solver;
@@ -117,11 +117,19 @@ function build_semi(p_list, base)
     return semi, turbines
 end
 
-function objective(p, base; tspan, saveat = 0.05, rho = 1000.0)
+function objective(p, base; tspan, saveat = 0.05, rho = 1000.0*20^3)
     semi, turbines = build_semi(p, base)
     ode = semidiscretize(semi, tspan)
 
     callbacks = CallbackSet()
+
+    power_callback = SimplePowerOutputCallback(semi, turbines;
+                                        #    filename = "out/turbine_power.csv",
+                                           filename = "/Users/weixuan/.julia/dev/TidalTurbines/examples/tidal_headland_objective/out/turbine_power_new.csv",
+                                           dt = 0.05,
+                                           rho = rho)
+    stepsize_callback = StepsizeCallback(cfl = 0.6)
+    callbacks = CallbackSet(power_callback, stepsize_callback);
 
     stage_limiter! = PositivityPreservingLimiterShallowWater(variables = (waterheight,))
 
@@ -132,11 +140,13 @@ function objective(p, base; tspan, saveat = 0.05, rho = 1000.0)
                 adaptive = false,
                 saveat)
 
-    E, _ = compute_total_turbine_energy(sol, semi, turbines; rho)
+    E, _ = compute_total_turbine_energy(sol, semi, turbines; rho = rho)
     return -E
 end
 
 base = build_base_simulation()
 p = [(Lx / 2, 0.25 * Ly)]
 
-J0 = objective(p, base; tspan = (0.0, T))
+J0 = objective(p, base; tspan = (0.0, T), rho = 1000.0*D^3)
+
+println("J0 = objective(p) = ", J0)

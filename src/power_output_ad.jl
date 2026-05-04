@@ -1,6 +1,7 @@
 export compute_total_turbine_energy
+export SimplePowerOutputCallback
 
-function compute_turbine_powers(semi, u_ode, turbines; rho = 1000.0)
+function compute_turbine_powers(semi, u_ode, turbines; rho = 1000.0*20^3)
     solver    = semi.solver
     equations = semi.equations
     cache     = semi.cache
@@ -115,6 +116,7 @@ function initialize_simple_power_logger!(logger::SimpleTurbinePowerLogger)
     append!(header, ["P_turbine_$k" for k in 1:length(logger.turbines)])
     push!(header, "P_total")
     push!(header, "E_total")
+    append!(header, ["U_avg_$k" for k in 1:length(logger.turbines)])
 
     open(logger.filename, "w") do io
         writedlm(io, permutedims(header), ',')
@@ -123,31 +125,110 @@ function initialize_simple_power_logger!(logger::SimpleTurbinePowerLogger)
     logger.initialized = true
 end
 
-# ---- write one row
-function write_simple_power_row!(logger::SimpleTurbinePowerLogger, t, powers, P_total)
-    row = vcat([t], powers, [P_total, logger.cumulative_energy])
+# # ---- write one row
+# function write_simple_power_row!(logger::SimpleTurbinePowerLogger, t, powers, P_total)
+#     row = vcat([t], powers, [P_total, logger.cumulative_energy])
+#     open(logger.filename, "a") do io
+#         writedlm(io, permutedims(row), ',')
+#     end
+# end
+
+# # ---- callback action
+# function simple_power_logger_affect!(integrator, logger::SimpleTurbinePowerLogger)
+#     if !logger.initialized
+#         initialize_simple_power_logger!(logger)
+#     end
+
+#     t = integrator.t
+#     powers, P_total = compute_turbine_powers(logger.semi, integrator.u,
+#                                                     logger.turbines;
+#                                                     rho = logger.rho)
+
+#     # trapezoidal cumulative energy
+#     if t > logger.last_time
+#         logger.cumulative_energy += 0.5 * (logger.last_power + P_total) * (t - logger.last_time)
+#     end
+
+#     write_simple_power_row!(logger, t, powers, P_total)
+
+#     logger.last_time = t
+#     logger.last_power = P_total
+#     logger.next_time += logger.dt
+# end
+function compute_turbine_weighted_U(semi, u_ode, turbines)
+    solver    = semi.solver
+    equations = semi.equations
+    cache     = semi.cache
+
+    u_wrap = Trixi.wrap_array(u_ode, semi)
+
+    nturb = length(turbines)
+    T = eltype(u_wrap)
+
+    U_weighted = zeros(T, nturb)
+    weight_sum = zeros(T, nturb)
+
+    for element in eachelement(solver, cache)
+        for j in eachnode(solver), i in eachnode(solver)
+            x = get_node_xy(cache, i, j, element)
+            dV = get_node_volume_weight(solver, cache, i, j, element)
+            u_node = get_node_state(u_wrap, i, j, element)
+
+            h, hv_1, hv_2, _ = u_node
+            h_eff = max(h, equations.threshold_limiter)
+
+            v1 = hv_1 / h_eff
+            v2 = hv_2 / h_eff
+            U  = sqrt(v1^2 + v2^2)
+
+            for n in 1:nturb
+                phi = turbine_density_single(x, turbines[n])
+                if phi > 0
+                    w = phi * dV
+                    U_weighted[n] += U * w
+                    weight_sum[n] += w
+                end
+            end
+        end
+    end
+
+    U_avg = similar(U_weighted)
+    for n in 1:nturb
+        U_avg[n] = weight_sum[n] > 0 ? U_weighted[n] / weight_sum[n] : zero(T)
+    end
+
+    return U_avg
+end
+
+function write_simple_power_row!(logger::SimpleTurbinePowerLogger, t, powers, P_total, U_avg)
+    row = vcat([t], powers, [P_total, logger.cumulative_energy], U_avg)
     open(logger.filename, "a") do io
         writedlm(io, permutedims(row), ',')
     end
 end
 
-# ---- callback action
 function simple_power_logger_affect!(integrator, logger::SimpleTurbinePowerLogger)
     if !logger.initialized
         initialize_simple_power_logger!(logger)
     end
 
     t = integrator.t
-    powers, P_total = compute_turbine_powers(logger.semi, integrator.u,
-                                                    logger.turbines;
-                                                    rho = logger.rho)
+
+    powers, P_total = compute_turbine_powers(
+        logger.semi, integrator.u, logger.turbines;
+        rho = logger.rho
+    )
+
+    U_avg = compute_turbine_weighted_U(
+        logger.semi, integrator.u, logger.turbines
+    )
 
     # trapezoidal cumulative energy
     if t > logger.last_time
         logger.cumulative_energy += 0.5 * (logger.last_power + P_total) * (t - logger.last_time)
     end
 
-    write_simple_power_row!(logger, t, powers, P_total)
+    write_simple_power_row!(logger, t, powers, P_total, U_avg)
 
     logger.last_time = t
     logger.last_power = P_total
@@ -156,7 +237,7 @@ end
 
 # ---- callback constructor
 function SimplePowerOutputCallback(semi, turbines;
-                                   filename = "out/turbine_power.csv",
+                                   filename = "out/turbine_power_new.csv",
                                    dt = 0.1,
                                    rho = 1000.0)
 
