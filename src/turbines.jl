@@ -114,7 +114,7 @@ end
 
     dA = turbine_density_single(x, turb)
     if dA <= 0
-        return 0.0
+        return zero(dA)
     end
 
     v1 = hv_1 / h_eff
@@ -156,6 +156,6 @@ end
     if abs(ξ) < 1
         return exp(1 - 1 / (1 - ξ^2))
     else
-        return zero(x)
+        return zero(ξ)
     end
 end
