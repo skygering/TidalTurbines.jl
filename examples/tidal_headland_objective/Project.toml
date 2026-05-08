@@ -1,0 +1,4 @@
+[deps]
+OrdinaryDiffEqSSPRK = "669c94d9-1f4b-4b64-b377-1aa079aa2388"
+Trixi = "a7f1ee26-1774-49b1-8366-f1abc58fbfcb"
+TrixiShallowWater = "804cb1fc-5b08-4398-a671-a789bfe091b3"

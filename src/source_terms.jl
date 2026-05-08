@@ -70,10 +70,10 @@ FrictionSource() = FrictionSource(0.001)
     # h = (h2 + max(h2, 1e-8)) / (2h)
 
     invh = inv(h)
-    hpow = invh * invh * cbrt(invh) # invh^(7/3)
+    hpow = invh * invh * cbrt(invh) # invh^(-7/3)
 
     vel2 = hv1^2 + hv2^2
-    vel  = sqrt(vel2)
+    vel  = (vel2)^(1/2)
 
     Sf = -g * n2 * hpow * vel
     zeroT = zero(T)
@@ -93,41 +93,43 @@ end
 @inline function (tf::TurbineFriction{T})(u, x, t,
                                           equations::ShallowWaterEquations2D) where T
 
+    R = promote_type(T, eltype(u))
+    zero_R = zero(R)
+
     h, hv1, hv2, _ = u
 
     hmin = equations.threshold_limiter
     h_eff = max(h, hmin)
 
     h_eff <= hmin &&
-        return SVector{4,T}(0,0,0,0)
+        return SVector(zero_R, zero_R, zero_R, zero_R)
 
     invh = inv(h_eff)
-
     v1 = hv1 * invh
     v2 = hv2 * invh
 
-    U2 = muladd(v1, v1, v2*v2)
-    U  = sqrt(U2)
+    U_sq = v1^2 + v2^2
+    # # Guard against sqrt(0) — its derivative is infinite, giving NaN under AD
+    if U_sq <= zero(U_sq)
+        return SVector(zero_R, zero_R, zero_R, zero_R)
+    end
+    U = (U_sq)^(1/2)
 
-    S_hv1 = zero(T)
-    S_hv2 = zero(T)
-
+    S_hv1 = zero_R
+    S_hv2 = zero_R
     @inbounds for turb in tf.turbines
 
         h_eff <= turb.h_min && continue
 
         dA = turbine_density_single(x, turb)
-        dA <= 0 && continue
+        dA <= zero_R && continue
 
         Ct = Ct_turbine(U, turb)
-
-        Kt = T(0.5) * Ct * turb.At * dA * invh
-
+        Kt = R(0.5) * Ct * R(turb.At) * dA * invh
         drag = Kt * U
-
         S_hv1 -= drag * hv1
         S_hv2 -= drag * hv2
     end
 
-    return SVector(zero(T), S_hv1, S_hv2, zero(T))
+    return SVector(zero_R, S_hv1, S_hv2, zero_R)
 end
