@@ -3,6 +3,13 @@ using OrdinaryDiffEqSSPRK
 using CairoMakie
 using Trixi2Vtk
 using TidalTurbines
+using Trixi
+using TrixiBottomTopography
+
+include("bathymetry.jl")
+include("boundary_conditions.jl")
+include("turbines.jl")
+include("power_output_ad.jl")
 
 function build_base_simulation()
     equations = ShallowWaterEquations2D(gravity = 9.81, H0 = 0.0)
@@ -74,11 +81,6 @@ function build_base_simulation()
         variable = waterheight
     )
 
-    # volume_integral = VolumeIntegralShockCapturingHG(
-    #     indicator_sc;
-    #     volume_flux_dg = volume_flux,
-    #     volume_flux_fv = surface_flux
-    # )
     volume_integral = VolumeIntegralFluxDifferencing(volume_flux)
 
     solver = DGSEM(basis, surface_flux, volume_integral)
@@ -131,7 +133,9 @@ p0 = [3.80, 1.70]
 J0 = objective(p0, base; tspan = (0.0, 1), saveat = 0.05)
 
 println("objective(p0) = ", J0)
-
+##
 using ForwardDiff
 g = ForwardDiff.gradient(p -> objective(p, base), p0)
 println("gradient at p0 = ", g)
+
+turbines = [Turbine(; x0 = Lx / 2, y0 = α * Ly, u_rated, u_in, u_out, h_min) for α in LinRange(0.175, 0.425, 3)]

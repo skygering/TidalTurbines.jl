@@ -51,7 +51,7 @@ end
     n = 0.001
     h = (h^2 + max(h^2, 1e-8)) / (2 * h)
 
-    Sf = -equations.gravity * n^2 * h^(-7 / 3) * sqrt(hv_1^2 + hv_2^2)
+    Sf = -equations.gravity * n^2 * h^(-7 / 3) * (hv_1^2 + hv_2^2)^(1/2)
 
     return SVector(zero(eltype(x)), Sf * hv_1, Sf * hv_2, zero(eltype(x)))
 end
@@ -77,7 +77,7 @@ end
 
     v1 = hv1 / h_eff
     v2 = hv2 / h_eff
-    U  = sqrt(v1^2 + v2^2)
+    U  = (v1^2 + v2^2)^(1/2)
 
     S_h   = zero_T
     S_hv1 = zero_T

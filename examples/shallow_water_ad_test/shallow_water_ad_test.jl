@@ -3,6 +3,7 @@ using OrdinaryDiffEqSSPRK
 using Trixi
 using TrixiShallowWater
 using ForwardDiff
+using OrdinaryDiffEq
 
 # ============================================================================
 # MINIMAL SHALLOW WATER AD TEST
@@ -13,9 +14,9 @@ rm(output_directory, recursive=true, force=true)
 mkpath(output_directory)
 
 # Simple domain setup
-# Lx = 10.0
-# Ly = 5.0
-# g = 9.81
+Lx = 10.0
+Ly = 5.0
+g = 9.81
 
 # Create a simple mesh
 # ad_test = newProject("min_ad_test", "examples/minimum_working_ad")
@@ -34,7 +35,7 @@ mkpath(output_directory)
 # mesh_file = joinpath(@__DIR__, "min_ad_test.mesh")
 # mesh = UnstructuredMesh2D(mesh_file)
 
-# bathy = FlatBathymetry(-2.0)
+bathy = FlatBathymetry(-2.0)
 
 # Create an unstructured mesh project
 refined_mesh = newProject("refined_mesh", "examples/shallow_water_ad_test")
@@ -59,7 +60,8 @@ for i in 1:2:length(p0)
 end
 
 # Plot and save mesh
-plotProject!(refined_mesh, GRID + REFINEMENTS);
+println(GRID + REFINEMENTS)
+plot = plotProject!(refined_mesh, GRID + REFINEMENTS)
 generate_mesh(refined_mesh);
 
 mesh_file = joinpath(@__DIR__, "refined_mesh.mesh")
@@ -83,98 +85,73 @@ end
 ## ============================================================================
 # Simple turbine source term
 # ============================================================================
+function source_terms_turbine(x0, y0; 
+                              rho=1000.0,      # water density (kg/m³)
+                              Ct=0.6,          # thrust coefficient
+                              D=20.0,          # rotor diameter (m)
+                              kernel_radius=1.0) # characteristic decay length
+    """
+    Returns a source term function for a turbine at location (x0, y0)
+    with smooth Gaussian spatial decay.
+    
+    Drag force: F = 0.5 * rho * Ct * A * |u| * u * kernel(r)
+    where kernel decays smoothly to 0 away from turbine center
+    """
+    A = π * D^2 / 4  # rotor area
+    
+    @inline function source_term(u, x, t, equations::ShallowWaterEquations2D)
+        h, hu, hv, _ = u
+        
+        # Distance from turbine center
+        dx = x[1] - x0
+        dy = x[2] - y0
+        r2 = dx^2 + dy^2
+        
+        # Smooth Gaussian kernel centered at (x0, y0)
+        kernel = exp(-r2 / (2 * kernel_radius^2))
+        
+        # Local velocities
+        u_vel = hu / max(h, 1e-8)
+        v_vel = hv / max(h, 1e-8)
+        u_mag = (u_vel^2 + v_vel^2)^(1/2)
+        
+        # Drag force coefficient (includes smooth spatial decay)
+        # Normalized by h to get momentum sink per unit volume
+        drag_coeff = 0.5 * rho * Ct * A * kernel / max(h, 1e-8)
+        
+        # Momentum sink (opposes flow direction)
+        F_x = -drag_coeff * u_mag * hu
+        F_y = -drag_coeff * u_mag * hv
+        
+        return SVector(zero(eltype(x)), F_x, F_y, zero(eltype(x)))
+    end
+    
+    return source_term
+end
 
-"""
-    smooth_spatial_weight(x, x_turb, y_turb, r_support)
+# ============================================================================
+# Helper functions
+# ============================================================================
 
-Create a smooth spatial weight centered at turbine location.
-Uses exponential decay instead of bump function.
-"""
-@inline function smooth_spatial_weight(x, x_turb, y_turb, r_support)
+function smooth_spatial_weight(x, x_turb, y_turb, r_support)
+    """Gaussian spatial kernel centered at turbine location"""
     dx = x[1] - x_turb
     dy = x[2] - y_turb
-    r_sq = dx^2 + dy^2
-    
-    # Smooth Gaussian-like decay centered at turbine
-    weight = exp(-5.0 * r_sq / (r_support^2))
-    
-    return weight
+    r2 = dx^2 + dy^2
+    return exp(-r2 / (2 * r_support^2))
 end
 
-"""
-    smooth_ct_profile(U)
-
-Create a smooth Ct profile that varies with velocity.
-No piecewise logic - uses smooth tanh transitions.
-"""
-@inline function smooth_ct_profile(U)
-    u_rated = 1.5
-    Ct_rated = 0.8
-    
-    # Smooth ramp up from 0 to Ct_rated as U increases
-    # Uses tanh for smooth transition
-    ramp = 0.5 * (1.0 + tanh(10.0 * (U - 0.5)))
-
-    # Smooth decrease above rated speed
-    decrease = 0.5 * (1.0 + tanh(10.0 * (u_rated - U)))
-    
-    Ct = Ct_rated * ramp * decrease
-    
-    return Ct
-end
-
-"""
-    source_term_simple_turbine(u, x, t, equations::ShallowWaterEquations2D)
-
-Simple AD-friendly turbine source term.
-Single turbine at fixed location with smooth Ct profile.
-"""
-function source_term_simple_turbine(u, x, t, equations::ShallowWaterEquations2D)
-    h, hv_1, hv_2, b = u
-    
-    # Turbine parameters
-    x_turb = 5.0      # Turbine x-location
-    y_turb = 2.0      # Turbine y-location
-    r_support = 0.5   # Turbine radius of influence
-    D = 1.0           # Turbine diameter
-    rho_water = 1000.0
-    
-    # Ensure h is not too small to avoid division issues
-    h_safe = max(h, 0.01)
-    
-    # Get velocity magnitude
-    U_mag = (hv_1^2 + hv_2^2)^(1/2)
-    
-    # Spatial weight (smooth Gaussian)
-    weight = smooth_spatial_weight(x, x_turb, y_turb, r_support)
-    
-    # Smooth Ct profile
-    Ct = smooth_ct_profile(U_mag)
-    
-    # Turbine thrust force
-    # F = 0.5 * rho * Ct * A * U^2
-    A = 0.25 * π * D^2
-    thrust = 0.5 * rho_water * Ct * A * (U_mag^2 + 1e-10)  # Small epsilon to avoid division by zero
-    
-    # Drag force in direction of flow
-    # Apply force proportional to velocity direction
-    F_x = -weight * thrust * hv_1 / (U_mag + 1e-10)
-    F_y = -weight * thrust * hv_2 / (U_mag + 1e-10)
-    
-    return SVector(zero(eltype(x)), F_x, F_y, zero(eltype(x)))
+function smooth_ct_profile(U_mag)
+    """Thrust coefficient profile"""
+    Ct_max = 0.9
+    return Ct_max * (U_mag > 0.1 ? 1.0 : U_mag / 0.1)
 end
 
 # ============================================================================
-# Multi-turbine version
+# Multi-turbine source term - FIXED TYPE ANNOTATION
 # ============================================================================
 
-"""
-    source_term_multi_turbine(turbines::Vector)
-
-Create a source term function for multiple turbines.
-Returns a function that can be used in SemidiscretizationHyperbolic.
-"""
-function source_term_multi_turbine(turbine_locations::Vector{Tuple})
+function source_term_multi_turbine(turbine_locations::Vector{<:Tuple})  # ← Changed here
     function source_term!(u, x, t, equations::ShallowWaterEquations2D)
         h, hv_1, hv_2, b = u
         
@@ -184,7 +161,7 @@ function source_term_multi_turbine(turbine_locations::Vector{Tuple})
         rho_water = 1000.0
         
         h_safe = max(h, 0.01)
-        U_mag = (hv_1^2 + hv_2^2)^(1/2)
+        U_mag = sqrt(hv_1^2 + hv_2^2)
         
         F_x = zero(eltype(x))
         F_y = zero(eltype(x))
@@ -207,7 +184,12 @@ function source_term_multi_turbine(turbine_locations::Vector{Tuple})
     return source_term!
 end
 
+# ============================================================================
+# Now these calls work:
+## ============================================================================
 
+source_single = source_terms_turbine(3.0, 2.0)
+source_multi = source_term_multi_turbine([(3.0, 2.0), (5.0, 3.0)])
 
 ## ====This worked (didn't yield NaNs in gradient)============================
 # Build base simulation
@@ -236,6 +218,8 @@ function build_shallow_water_simulation()
     end
     
     # Use slip wall for unstructured mesh
+    wm_left = WaveMaker(0.5, 0.05)
+    wm_right = WaveMaker(-0.5, 0.05)
     bc_left  = BoundaryConditionDirichlet(make_dirichlet_state(wm_left, bathy))
     bc_right = BoundaryConditionDirichlet(make_dirichlet_state(wm_right, bathy))
     boundary_condition = (;
@@ -285,7 +269,7 @@ end
 # Objective function parameterized by peak height
 # ============================================================================
 
-function objective_height(peak_height; tspan=(0.0, 1.0))
+function objective_height(peak_height; tspan=(0.0, 0.05))
     """
     Objective: integrate final water volume with respect to initial peak height
     """
@@ -301,23 +285,128 @@ function objective_height(peak_height; tspan=(0.0, 1.0))
     semi = SemidiscretizationHyperbolic(
         base.mesh, base.equations, initial_condition_param, base.solver;
         boundary_conditions = base.boundary_condition,
-        source_terms = source_terms_manning_friction,
+        source_terms = source_single,
         uEltype = typeof(peak_height)  # CRITICAL: Enable duals
     )
     
     ode = semidiscretize(semi, tspan)
     
     # Simple RK4 solver (no stage limiter, more AD-friendly)
-    sol = solve(ode, RK4();
+    stage_limiter! = PositivityPreservingLimiterShallowWater(variables = (waterheight,))
+
+    sol = solve(ode, SSPRK43(stage_limiter!);
                 dt = 0.001,
                 adaptive = false,
                 save_everystep = false)
+
     
     # Return final water volume
     return water_volume(sol.u[end], semi)
 end
 
+
+## Objective_turbine_energy:
 # ============================================================================
+# Objective function: total energy from single turbine
+# ============================================================================
+
+function objective_turbine_energy(turbine_x, turbine_y; 
+                                   tspan=(0.0, 0.05),
+                                   rho=1000.0)
+    """
+    Objective: integrate total turbine energy output over time
+    
+    Parameters:
+        turbine_x, turbine_y: location of single turbine
+        tspan: time span for simulation
+        rho: water density
+    
+    Returns:
+        E: total energy extracted by turbine (integral of power over time)
+    """
+    base = build_shallow_water_simulation()
+    
+    # Create source term for turbine at specified location
+    source_single = source_terms_turbine(
+        turbine_x, turbine_y;
+        rho=rho,
+        Ct=0.6,
+        D=20.0,
+        kernel_radius=1.0
+    )
+    
+    # Standard initial condition (Gaussian bump)
+    function initial_condition_bump(x, t, equations)
+        x_c, y_c = Lx/2, Ly/2
+        h = 1.0 + 0.2 * exp(-((x[1] - x_c)^2 + (x[2] - y_c)^2) / 0.5)
+        return SVector(h, 0.0, 0.0, 0.0)
+    end
+    
+    semi = SemidiscretizationHyperbolic(
+        base.mesh, base.equations, initial_condition_bump, base.solver;
+        boundary_conditions = base.boundary_condition,
+        source_terms = source_single,
+        uEltype = typeof(turbine_x)  # CRITICAL: Enable duals
+    )
+    
+    ode = semidiscretize(semi, tspan)
+    
+    # Solve with RK4
+    stage_limiter! = PositivityPreservingLimiterShallowWater(variables = (waterheight,))
+    sol = solve(ode, SSPRK43(stage_limiter!);
+                dt = 0.001,
+                adaptive = false,
+                save_everystep = true)  # Need all timesteps for energy integration
+    
+    # Compute total turbine energy
+    turbines = [(turbine_x, turbine_y)]
+    E, P_hist = compute_total_turbine_energy(sol, semi, turbines; rho=rho)
+    
+    return E
+end
+
+# ============================================================================
+# Test with scalar inputs
+# ============================================================================
+
+println("=== TEST 1: Single turbine energy (Float64) ===")
+x_turb_0, y_turb_0 = 3.0, 2.0
+E_0 = objective_turbine_energy(x_turb_0, y_turb_0; tspan=(0.0, 0.02))
+println("Total energy at turbine location ($x_turb_0, $y_turb_0): $E_0")
+
+# ============================================================================
+# Test with Dual numbers for gradient
+# ============================================================================
+
+println("\n=== TEST 2: Gradient via ForwardDiff ===")
+try
+    # Gradient w.r.t. both x and y coordinates
+    function obj_wrapper(m)
+        return objective_turbine_energy(m[1], m[2]; tspan=(0.0, 0.02))
+    end
+    
+    m0 = [3.0, 2.0]
+    dE_dm = ForwardDiff.gradient(obj_wrapper, m0)
+    println("Gradient ∇E: $dE_dm")
+    println("  ∂E/∂x = $(dE_dm[1])")
+    println("  ∂E/∂y = $(dE_dm[2])")
+    
+    if !any(isnan, dE_dm)
+        println("✓ Valid gradient!")
+    else
+        println("⚠️ NaN in gradient!")
+    end
+catch e
+    println("✗ Error: $e")
+    showerror(stderr, e)
+end
+
+
+
+
+
+
+## ============================================================================
 # Test 1: Objective works with Float64
 # ============================================================================
 tspan = (0,0.02)
@@ -352,9 +441,10 @@ end
 # ============================================================================
 
 println("\n=== TEST 3: ForwardDiff.derivative ===")
+#dV_dp = ForwardDiff.derivative(objective_height, 0.5)
 try
-    dV_dp = ForwardDiff.derivative(objective_height, 0.5)
-    println("Derivative: $dV_dp")
+    dV_dp = ForwardDiff.derivative(objective_height, 0.4)
+    println("Gradient: $dV_dp")
     println("✓ Success!")
 catch e
     println("✗ Error: $e")

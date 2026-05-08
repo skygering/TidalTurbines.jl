@@ -138,5 +138,10 @@ end
 
 base = build_base_simulation()
 p = [(Lx / 2, 0.25 * Ly)]
+T = 2
 
 J0 = objective(p, base; tspan = (0.0, T))
+
+## Optimization challenge
+using ForwardDiff
+gradient = ForwardDiff.gradient(objective, )

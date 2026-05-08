@@ -141,28 +141,28 @@ function objective(p, base; tspan = (0.0, 22.5), saveat = 0.05, rho = 1000.0)
           ode_default_options()..., callback = callbacks, adaptive = false, saveat = saveat, save_everystep = false);
 
     # # just for debug, not adaptive
-    # callbacks = CallbackSet(analysis_callback,
-    #                         stepsize_callback,
-    #                         save_solution,
-    #                         power_callback);
-    # sol2 = solve(ode, SSPRK43(stage_limiter!); dt = 1.0,
-    #       ode_default_options()..., callback = callbacks, adaptive = false);
-    # ######
+    callbacks = CallbackSet(analysis_callback,
+                            stepsize_callback,
+                            save_solution,
+                            power_callback);
+    sol2 = solve(ode, SSPRK43(stage_limiter!); dt = 1.0,
+          ode_default_options()..., callback = callbacks, adaptive = false);
+    ######
 
-    # println(sol.t == sol2.t)
+    println(sol.t == sol2.t)
 
-    # sol = solve(
-    #     ode,
-    #     SSPRK43(stage_limiter!);
-    #     dt = 1.0,
-    #     adaptive = false,
-    #     # saveat = saveat,
-    #     callback = stepsize_callback,
-    #     ode_default_options()...
-    # )
+    sol = solve(
+        ode,
+        SSPRK43(stage_limiter!);
+        dt = 1.0,
+        adaptive = false,
+        # saveat = saveat,
+        callback = stepsize_callback,
+        ode_default_options()...
+    )
 
-    # E2, _ = compute_total_turbine_energy(sol2, semi, turbines; rho = rho)
-    # println("E = ", E, ", E2 = ", E2)
+    E2, _ = compute_total_turbine_energy(sol2, semi, turbines; rho = rho)
+    println("E = ", E, ", E2 = ", E2)
     
     E, _ = compute_total_turbine_energy(sol, semi, turbines; rho = rho)
     
