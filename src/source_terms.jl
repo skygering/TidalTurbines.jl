@@ -68,21 +68,27 @@ end
                                       equations::ShallowWaterEquations2D,
                                       turbines::Vector{Turbine{T}}) where T
     h, hv1, hv2, _ = u
-    zero_T = zero(T)
+    R = promote_type(T, eltype(u))
+    zero_R = zero(R)
 
     h_eff = max(h, equations.threshold_limiter)
     if h_eff <= equations.threshold_limiter
-        return SVector(zero_T, zero_T, zero_T, zero_T)
+        return SVector(zero_R, zero_R, zero_R, zero_R)
     end
 
     v1 = hv1 / h_eff
     v2 = hv2 / h_eff
-    U  = sqrt(v1^2 + v2^2)
+    U_sq = v1^2 + v2^2
+    # Guard against sqrt(0) — its derivative is infinite, giving NaN under AD
+    if U_sq <= zero(U_sq)
+        return SVector(zero_R, zero_R, zero_R, zero_R)
+    end
+    U  = sqrt(U_sq)
 
-    S_h   = zero_T
-    S_hv1 = zero_T
-    S_hv2 = zero_T
-    S_b   = zero_T
+    S_h   = zero_R
+    S_hv1 = zero_R
+    S_hv2 = zero_R
+    S_b   = zero_R
 
     for turb in turbines
 
@@ -91,14 +97,14 @@ end
         end
 
         dA = turbine_density_single(x, turb)
-        if dA <= zero_T
+        if dA <= zero(dA)
             continue
         end
 
-        At = T(0.25) * T(pi) * turb.D^2
+        At = R(0.25) * R(pi) * turb.D^2
         Ct = Ct_turbine(U, turb)
 
-        Kt = T(0.5) * Ct * At * dA / h_eff
+        Kt = R(0.5) * Ct * At * dA / h_eff
 
         S_hv1 -= Kt * U * hv1
         S_hv2 -= Kt * U * hv2

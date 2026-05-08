@@ -48,7 +48,7 @@ h_min = 0.02 / D
 
 # solver time values
 t_out = round(Int, T / 10)
-Δt = 0.5 * sqrt(g / D)
+Δt = 0.5 * sqrt(g / D) / 4
 tspan = (0.0, 0.25 * T)
 
 # (1) create mesh
@@ -58,7 +58,7 @@ setMeshFileFormat!(tidal, "ISM-V2")
 HOHQMesh.getModelDict(tidal)
 
 bounds = [Ly, 0.0, 0.0, Lx] # [top, left, bottom, right]
-N = [16, 8, 0]
+N = [32, 16, 0]
 addBackgroundGrid!(tidal, bounds, N)
 generate_mesh(tidal)
 
@@ -103,10 +103,10 @@ function build_semi(p, base)
     # p is a flat vector: [x1, y1, x2, y2, ...] for n turbines
     n = length(p) ÷ 2
     turbines = [Turbine(; x0 = p[2i-1], y0 = p[2i], u_rated, u_in, u_out, h_min) for i in 1:n]
-                                                                          
-    # turbines                                                                                                   
-    # turbines = [Turbine(; x0 = p[1], y0 = p[2], u_rated, u_in, u_out, h_min) for p in p_list]  
-      
+
+    # turbines
+    # turbines = [Turbine(; x0 = p[1], y0 = p[2], u_rated, u_in, u_out, h_min) for p in p_list]
+
     # source terms
     sponge_source = make_sponge_source(; Lx, σ_max=σₘ)
     friction_source = source_terms_manning_friction
@@ -118,6 +118,7 @@ function build_semi(p, base)
         base.mesh, base.equations, base.initial_condition, base.solver;
         boundary_conditions = base.boundary_condition,
         source_terms = all_source_terms,
+        uEltype = eltype(p),
     )
     return semi, turbines
 end
@@ -167,12 +168,73 @@ function objective(p, base; tspan, saveat = 0.05, rho = 1000.0*20^3)
 end
 
 base = build_base_simulation()
-p = [Lx / 2, 0.25 * Ly]  # flat vector: [x1, y1, ...] for ForwardDiff compatibility
+p = [Lx / 6, 0.2 * Ly]  # flat vector: [x1, y1, ...] for ForwardDiff compatibility
 
-J0 = objective(p, base; tspan = (0.0, 1.0), rho = 1000.0*D^3)
+J0 = objective(p, base; tspan = (0.0, T), rho = 1000.0*D^3)
 
 println("J0 = objective(p) = ", J0)
 
 using ForwardDiff
-g = ForwardDiff.gradient(p -> objective(p, base; tspan = (0.0, 1.0), rho = 1000.0*D^3), p)
+g = ForwardDiff.gradient(p -> objective(p, base; tspan = (0.0, T), rho = 1000.0*D^3), p)
 println("gradient at p0 = ", g)
+
+# -------------------------------------------------------------------
+# Gradient descent for optimal turbine placement
+# -------------------------------------------------------------------
+# Objective is -E (negative total energy), so minimizing it maximizes energy.
+# Each evaluation traces ForwardDiff through the ODE solve, so iterations
+# are expensive — keep max_iter modest and tune α / tspan_opt to taste.
+
+function clip_to_domain!(p; margin = 2 * 0.5)
+    # Keep turbines inside [margin, Lx-margin] x [margin, Ly-margin].
+    # margin ≈ 2 * r_support so the bump support stays inside the domain.
+    n = length(p) ÷ 2
+    for i in 1:n
+        p[2i-1] = clamp(p[2i-1], margin, Lx - margin)
+        p[2i]   = clamp(p[2i],   margin, Ly - margin)
+    end
+    return p
+end
+
+function gradient_descent(p0, base;
+                          tspan_opt = (0.0, 0.25 * T),
+                          rho = 1000.0 * D^3,
+                          α = 0.5,             # step size in domain units
+                          max_iter = 20,
+                          grad_tol = 1e-8,
+                          normalize_step = true)
+    p = copy(p0)
+    f = p -> objective(p, base; tspan = tspan_opt, rho = rho)
+    history = Tuple{Int, Float64, Vector{Float64}}[]   # (iter, J, p)
+
+    for k in 0:max_iter
+        result = ForwardDiff.DiffResults.GradientResult(p)
+        ForwardDiff.gradient!(result, f, p)
+        J = ForwardDiff.DiffResults.value(result)
+        ∇J = ForwardDiff.DiffResults.gradient(result)
+        gnorm = sqrt(sum(abs2, ∇J))
+
+        push!(history, (k, J, copy(p)))
+        @info "iter=$k  J=$(J)  E=$(-J)  ‖∇J‖=$(gnorm)  p=$(p)"
+
+        if gnorm < grad_tol
+            @info "Gradient below tolerance — stopping"
+            break
+        end
+        k == max_iter && break
+
+        # Normalized step keeps each iteration moving by ~α regardless of |∇J|.
+        step = normalize_step ? α * ∇J / gnorm : α * ∇J
+        p .-= step
+        clip_to_domain!(p)
+    end
+    return p, history
+end
+
+p_star, hist = gradient_descent(copy(p), base;
+                                tspan_opt = (0.0, T),  # increase for physical results
+                                α = 0.5,
+                                max_iter = 20)
+
+println("\noptimal p = ", p_star)
+println("final energy E = ", -hist[end][2])
