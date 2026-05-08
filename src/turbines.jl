@@ -11,6 +11,7 @@ struct Turbine{T}
     u_out::T
     h_min::T
     D::T
+    At::T
 end
 
 # -------------------------------------------------------------------
@@ -33,10 +34,11 @@ function Turbine(;
                      typeof(u_in), typeof(u_rated),
                      typeof(u_out), typeof(h_min), typeof(D))
 
+    At = T(0.25) * T(pi) * T(D)^2
     return Turbine{T}(T(x0), T(y0), T(r_support),
                       T(Ct_rated), T(Cp_rated),
                       T(u_in), T(u_rated),
-                      T(u_out), T(h_min), T(D))
+                      T(u_out), T(h_min), T(D), At)
 end
 
 # -------------------------------------------------------------------
@@ -122,13 +124,12 @@ end
     U  = sqrt(v1^2 + v2^2)
 
     Cp = Cp_turbine(U, turb)
-    At = 0.25 * pi * turb.D^2
     # print("  turbine at (", turb.x0, ", ", turb.y0, "): U = ", U, " m/s, Cp = ", Cp)
-    return 0.5 * rho * Cp * At * dA * U^3
+    return 0.5 * rho * Cp * turb.At * dA * U^3
 end
 
-@inline function turbine_power_density_total(u, x, equations, turbines; rho = 1000.0)
-    p_total = zero(eltype(u))
+@inline function turbine_power_density_total(u, x, equations, turbines::Vector{Turbine{T}}; rho = 1000.0) where T
+    p_total = zero(T)
     for turb in turbines
         p_total += turbine_power_density_single(u, x, equations, turb; rho = rho)
     end
@@ -154,7 +155,7 @@ end
 @inline function bump_1d(x, p, r)
     ξ = (x - p) / r
     if abs(ξ) < 1
-        return exp(1 - 1 / (1 - ξ^2))
+        return exp(1 - inv(1 - ξ^2))
     else
         return zero(x)
     end

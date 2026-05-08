@@ -31,9 +31,9 @@ Hₛ = -5 / D # headland/shelf depth
 Rₛ = 160 / D # headland/shelf radius
 
 # tidal values
-T = 60 * 60 * sqrt(g / D)
+T = 1 * 60 * 60 * sqrt(g / D)
 ω = 2π / T
-Aₜ = 0.275 / D
+Aₜ = 4 * 0.275 / D
 
 # turbine values
 u_in = 1 / sqrt(D * g) # cut-in speed
@@ -44,7 +44,7 @@ h_min = 0.02 / D
 # sponge layer strength σ [1/s]
 # time scale: t ~ L_sponge / u_rated [s]
 # non-dimensional control paaram: tσ ~5 is good absorbing layer
-σₘ = 1 * u_rated / Lₛ
+σₘ = 5 * u_rated / Lₛ
 
 # solver time values
 t_out = round(Int, T / 10)
@@ -58,8 +58,18 @@ setMeshFileFormat!(tidal, "ISM-V2")
 HOHQMesh.getModelDict(tidal)
 
 bounds = [Ly, 0.0, 0.0, Lx] # [top, left, bottom, right]
-N = [16, 8, 0]
+N = [32, 16, 0]
 addBackgroundGrid!(tidal, bounds, N)
+headland_core = newRefinementCenter(
+    "headland_core", "smooth",
+    [Lx/2, Ly, 0.0],
+    Lx/(32*2),
+    1.5Rₛ
+)
+add!(tidal, headland_core)
+channel = newRefinementLine("channel", "smooth", [15.0, 7.5, 0.0],
+                         [45.0, 7.5, 0.0], Lx/(32*2), 10.0)
+add!(tidal, channel)
 generate_mesh(tidal)
 
 # function that returns solver setup
@@ -71,7 +81,7 @@ function build_base_simulation()
     # solver
     basis = LobattoLegendreBasis(3)
     surface_flux = (
-    FluxHydrostaticReconstruction(flux_hll_chen_noelle, hydrostatic_reconstruction_chen_noelle),
+        FluxHydrostaticReconstruction(flux_hll_chen_noelle, hydrostatic_reconstruction_chen_noelle),
         flux_nonconservative_chen_noelle,
     )
     volume_flux = (flux_wintermeyer_etal, flux_nonconservative_wintermeyer_etal)
@@ -88,8 +98,8 @@ function build_base_simulation()
     # boundary conditions
     wm_left  = WaveMaker(Aₜ, ω)
     wm_right = WaveMaker(-Aₜ, ω)
-    bc_left  = BoundaryConditionDirichlet(make_dirichlet_state(wm_left, bathy))
-    bc_right = BoundaryConditionDirichlet(make_dirichlet_state(wm_right, bathy))
+    bc_left  = DirichletWaveBC(wm_left, bathy)
+    bc_right = DirichletWaveBC(wm_right, bathy)
     boundary_condition = (;
         Bottom = boundary_condition_slip_wall,
         Top    = boundary_condition_slip_wall,
@@ -104,15 +114,15 @@ function build_semi(p_list, base)
     turbines = [Turbine(; x0 = p[1], y0 = p[2], u_rated, u_in, u_out, h_min) for p in p_list]
 
     # source terms
-    sponge_source = make_sponge_source(; Lx, σ_max=σₘ)
-    friction_source = source_terms_manning_friction
-    turbine_source = make_turbine_source(turbines)
-    all_source_terms = combine_source_terms([sponge_source, friction_source, turbine_source])
+    friction_source = FrictionSource()
+    sponge_source = SpongeSource(Lx, σₘ)
+    turbine_source = TurbineFriction(turbines)
+    source_terms = CombinedSource((sponge_source, friction_source, turbine_source))
 
     semi = SemidiscretizationHyperbolic(
         base.mesh, base.equations, base.initial_condition, base.solver;
         boundary_conditions = base.boundary_condition,
-        source_terms = all_source_terms
+        source_terms = source_terms
     )
     return semi, turbines
 end
@@ -137,6 +147,6 @@ function objective(p, base; tspan, saveat = 0.05, rho = 1000.0)
 end
 
 base = build_base_simulation()
-p = [(Lx / 2, 0.25 * Ly)]
+p = [(Lx / 2, α * Ly) for α in LinRange(0.1, 0.4, 3)]
 
 J0 = objective(p, base; tspan = (0.0, T))
