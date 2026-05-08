@@ -1,3 +1,6 @@
 [deps]
 Documenter = "e30172f5-a6a5-5a46-863b-614d45cd2de4"
 TidalTurbines = "c76bb1d2-eee4-4fb3-a690-55bfa31cf500"
+
+[compat]
+Documenter = "1.17.0"
