@@ -4,6 +4,7 @@ using Trixi
 using TrixiShallowWater
 using Trixi2Vtk
 using TidalTurbines
+using ForwardDiff
 
 #= 
 This setup is based on the paper:
@@ -160,7 +161,9 @@ function objective(p, base; tspan, saveat = 0.05, rho = 1000.0*20^3)
     T = eltype(p)
     ode = remake(ode; u0 = T.(ode.u0))
 
-    callbacks = CallbackSet()
+    alive_callback = AliveCallback(alive_interval = 100)
+    summary_callback = SummaryCallback()
+    callbacks = CallbackSet(alive_callback, summary_callback)
 
     stage_limiter! = PositivityPreservingLimiterShallowWater(variables = (waterheight,))
 
@@ -244,6 +247,7 @@ p_star, hist = gradient_descent(copy(p), base;
                                 tspan_opt = (0.0, T),  # increase for physical results
                                 α = 0.5,
                                 max_iter = 20)
+
 
 println("\noptimal p = ", p_star)
 println("final energy E = ", -hist[end][2])
