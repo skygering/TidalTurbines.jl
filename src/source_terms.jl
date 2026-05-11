@@ -59,31 +59,53 @@ end
 
 FrictionSource() = FrictionSource(0.001)
 
-@inline function (mf::FrictionSource{T})(u, x, t, equations::ShallowWaterEquations2D) where T
-    h, hv1, hv2, _ = u
+# @inline function (mf::FrictionSource{T})(u, x, t, equations::ShallowWaterEquations2D) where T
+#     h, hv1, hv2, _ = u
 
-    g = equations.gravity
-    n2 = mf.n * mf.n
+#     g = equations.gravity
+#     n2 = mf.n * mf.n
 
-    # wetting correction
-    # h2 = h * h
-    # h = (h2 + max(h2, 1e-8)) / (2h)
+#     # wetting correction
+#     # h2 = h * h
+#     # h = (h2 + max(h2, 1e-8)) / (2h)
 
-    invh = inv(h)
-    hpow = invh * invh * cbrt(invh) # invh^(-7/3)
+#     invh = inv(h)
+#     hpow = invh * invh * cbrt(invh) # invh^(-7/3)
 
-    vel2 = hv1^2 + hv2^2
-    vel  = (vel2)^(1/2)
+#     vel2 = hv1^2 + hv2^2
+#     vel  = (vel2)^(1/2)
 
-    Sf = -g * n2 * hpow * vel
-    zeroT = zero(T)
-    return SVector(
-        zeroT,
-        Sf * hv1,
-        Sf * hv2,
-        zeroT
-    )
-end
+#     Sf = -g * n2 * hpow * vel
+#     zeroT = zero(T)
+#     return SVector(
+#         zeroT,
+#         Sf * hv1,
+#         Sf * hv2,
+#         zeroT
+#     )
+# end
+
+  @inline function (mf::FrictionSource{T})(u, x, t, equations::ShallowWaterEquations2D) where T
+      h, hv1, hv2, _ = u                                                                                                                              
+      R = promote_type(T, eltype(u))
+      zeroR = zero(R)                                                                                                                                 
+                                                            
+      g = equations.gravity                                                                                                                           
+      n2 = mf.n * mf.n
+                                                                                                                                                      
+      invh = inv(h)                                         
+      hpow = invh * invh * cbrt(invh)
+
+      vel2 = hv1^2 + hv2^2                                                                                                                            
+      # Guard against sqrt(0) — derivative is Inf, multiplying by 0 partial → NaN
+      if vel2 <= zero(vel2)                                                                                                                           
+          return SVector(zeroR, zeroR, zeroR, zeroR)                                                                                                  
+      end
+      vel = sqrt(vel2)                                                                                                                                
+                                                            
+      Sf = -g * n2 * hpow * vel                                                                                                                       
+      return SVector(zeroR, Sf * hv1, Sf * hv2, zeroR)
+  end  
 
 struct TurbineFriction{T} <: AbstractSourceTerm
     turbines::Vector{Turbine{T}}

@@ -20,7 +20,7 @@ end
 function Turbine(; 
     x0, y0,
     u_in, u_rated, u_out,
-    r_support = 0.50,
+    r_support = 2.0,
     Ct_rated = 0.516,
     Cp_rated = nothing,
     h_min = 0.0,

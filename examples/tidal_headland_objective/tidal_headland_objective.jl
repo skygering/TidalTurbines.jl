@@ -162,8 +162,8 @@ function objective(p, base; tspan, saveat = 0.05, rho = 1000.0*20^3)
     ode = remake(ode; u0 = T.(ode.u0))
 
     alive_callback = AliveCallback(alive_interval = 100)
-    summary_callback = SummaryCallback()
-    callbacks = CallbackSet(alive_callback, summary_callback)
+    # summary_callback = SummaryCallback()
+    callbacks = CallbackSet(alive_callback)
 
     stage_limiter! = PositivityPreservingLimiterShallowWater(variables = (waterheight,))
 
@@ -182,13 +182,12 @@ end
 base = build_base_simulation()
 p = [Lx / 6, 0.2 * Ly]  # flat vector: [x1, y1, ...] for ForwardDiff compatibility
 
-J0 = objective(p, base; tspan = (0.0, T), rho = 1000.0*D^3)
+# J0 = objective(p, base; tspan = (0.0, 0.25 * T), rho = 1000.0*D^3)
 
-println("J0 = objective(p) = ", J0)
+# println("J0 = objective(p) = ", J0)
 
-using ForwardDiff
-g = ForwardDiff.gradient(p -> objective(p, base; tspan = (0.0, T), rho = 1000.0*D^3), p)
-println("gradient at p0 = ", g)
+# g = ForwardDiff.gradient(p -> objective(p, base; tspan = (0.0, T), rho = 1000.0*D^3), p)
+# println("gradient at p0 = ", g)
 
 # -------------------------------------------------------------------
 # Gradient descent for optimal turbine placement
@@ -197,13 +196,42 @@ println("gradient at p0 = ", g)
 # Each evaluation traces ForwardDiff through the ODE solve, so iterations
 # are expensive — keep max_iter modest and tune α / tspan_opt to taste.
 
-function clip_to_domain!(p; margin = 2 * 0.5)
-    # Keep turbines inside [margin, Lx-margin] x [margin, Ly-margin].
-    # margin ≈ 2 * r_support so the bump support stays inside the domain.
+function clip_to_domain!(p;
+                         margin = 2 * 0.5,
+                         headland_center = (Lx/2, Ly),
+                         headland_radius = Rₛ)
+    # Two constraints (both expanded by `margin` so the bump support stays clear):
+    #  (1) Box: turbine inside [margin, Lx-margin] × [margin, Ly-margin].
+    #  (2) Headland: turbine outside disk of radius (headland_radius + margin)
+    #      centered on `headland_center` (the shallow shoal at the top).
     n = length(p) ÷ 2
+    cx, cy = headland_center
+    rmin   = headland_radius + margin
+
     for i in 1:n
+        # 1) Box clip
         p[2i-1] = clamp(p[2i-1], margin, Lx - margin)
         p[2i]   = clamp(p[2i],   margin, Ly - margin)
+
+        # 2) Push radially out of the headland disk if inside
+        dx = p[2i-1] - cx
+        dy = p[2i]   - cy
+        d2 = dx^2 + dy^2
+        if d2 < rmin^2
+            d = sqrt(d2)
+            if d < 1e-12
+                # Degenerate: turbine right at headland center — pick a default direction.
+                p[2i-1] = cx
+                p[2i]   = cy - rmin
+            else
+                scale = rmin / d
+                p[2i-1] = cx + dx * scale
+                p[2i]   = cy + dy * scale
+            end
+            # Re-clip in case the radial projection pushed us outside the box
+            p[2i-1] = clamp(p[2i-1], margin, Lx - margin)
+            p[2i]   = clamp(p[2i],   margin, Ly - margin)
+        end
     end
     return p
 end
@@ -213,11 +241,29 @@ function gradient_descent(p0, base;
                           rho = 1000.0 * D^3,
                           α = 0.5,             # step size in domain units
                           max_iter = 20,
-                          grad_tol = 1e-8,
-                          normalize_step = true)
+                          grad_tol = 1e-3,
+                          normalize_step = true,
+                          csv_path = joinpath(output_directory, "gd_history.csv"),
+                          run_label = "p0=$(p0)")
     p = copy(p0)
     f = p -> objective(p, base; tspan = tspan_opt, rho = rho)
     history = Tuple{Int, Float64, Vector{Float64}}[]   # (iter, J, p)
+
+    n = length(p0)
+    mkpath(dirname(csv_path))
+    # First call (file missing): create + write header. Later calls: append only.
+    if !isfile(csv_path)
+        open(csv_path, "w") do io
+            coords = join(["x$i,y$i" for i in 1:(n÷2)], ",")
+            grads  = join(["gx$i,gy$i" for i in 1:(n÷2)], ",")
+            println(io, "iter,J,E,grad_norm,$coords,$grads")
+        end
+    end
+    # Title line separating this run from previous ones (prefixed with `#`
+    # so CSV parsers with `comment="#"` skip it cleanly).
+    open(csv_path, "a") do io
+        println(io, "# === run: $(run_label)  tspan=$(tspan_opt)  α=$α ===")
+    end
 
     for k in 0:max_iter
         result = ForwardDiff.DiffResults.GradientResult(p)
@@ -229,6 +275,13 @@ function gradient_descent(p0, base;
         push!(history, (k, J, copy(p)))
         @info "iter=$k  J=$(J)  E=$(-J)  ‖∇J‖=$(gnorm)  p=$(p)"
 
+        # Append one CSV row, flushed each iteration so partial runs are recoverable
+        open(csv_path, "a") do io
+            row = string(k, ",", J, ",", -J, ",", gnorm, ",",
+                         join(p, ","), ",", join(∇J, ","))
+            println(io, row)
+        end
+
         if gnorm < grad_tol
             @info "Gradient below tolerance — stopping"
             break
@@ -236,18 +289,114 @@ function gradient_descent(p0, base;
         k == max_iter && break
 
         # Normalized step keeps each iteration moving by ~α regardless of |∇J|.
-        step = normalize_step ? α * ∇J / gnorm : α * ∇J
-        p .-= step
-        clip_to_domain!(p)
+        # step = normalize_step ? α * ∇J / gnorm : α * ∇J
+        # p .-= step
+        # clip_to_domain!(p)
+
+        d = ∇J ./ gnorm
+        αk = α
+        p_try = similar(p)                                                                                                                                  
+        accepted = false
+        while αk >= 1e-5                                                                                                                                    
+            p_try .= p .- αk .* d                                                                                                                           
+            clip_to_domain!(p_try)
+            J_try = f(p_try)                                                                                                                                
+            if J_try < J                                                                                                                                    
+                p .= p_try
+                accepted = true                                                                                                                             
+                break                                             
+            end
+            αk *= 0.5
+        end
+        accepted || (@info "step rejected, stopping"; break)
+
     end
     return p, history
 end
 
-p_star, hist = gradient_descent(copy(p), base;
-                                tspan_opt = (0.0, T),  # increase for physical results
-                                α = 0.5,
-                                max_iter = 20)
+# Multi-start: try several initial points; everything goes into one CSV
+p0_list = [
+    # [Lx/6,    0.2 * Ly], 
+    [Lx/2,    0.25 * Ly]
+    # [Lx/2 - 6, Ly/4],     
+    # [Lx/2 + 6, Ly/4],   
+    # [Lx/2,    Ly/3],       
+    # [3Lx/4,   Ly/4],       
+]
 
+# best_p = zero(p0_list)
+# best_E = 0.0
+for p0 in p0_list
+    p_star, hist = gradient_descent(copy(p0), base;
+                                    tspan_opt = (0.0, 0.25 * T),
+                                    α = 0.5,
+                                    max_iter = 200,
+                                    grad_tol = 1e-5,
+                                    run_label = "from p0=$(p0)")
+    E_star = -hist[end][2]
+    @info "from $p0  →  $p_star  E = $E_star"
+    # if E_star > best_E
+    #     best_E = E_star
+    #     best_p = p_star
+    # end
+end
 
-println("\noptimal p = ", p_star)
-println("final energy E = ", -hist[end][2])
+# println("\nBEST: optimal p = ", best_p, "   E = ", best_E)
+
+# -------------------------------------------------------------------
+# L-BFGS via Optim.jl (recommended over plain GD)
+# -------------------------------------------------------------------
+# Use Optim.only_fg!: when Optim wants both value and gradient, do a
+# single ForwardDiff sweep; when it only wants a value (line search),
+# do a plain Float64 forward solve — much cheaper than AD.
+
+# using Optim
+
+# function lbfgs_optimize(p0, base;
+#                         tspan_opt = (0.0, 0.25 * T),
+#                         rho = 1000.0 * D^3,
+#                         margin = 2 * 0.5,
+#                         iterations = 30,
+#                         g_tol = 1e-6,
+#                         show_trace = true)
+
+#     obj    = p -> objective(p, base; tspan = tspan_opt, rho = rho)
+#     n_eval = Ref(0)
+#     n_grad = Ref(0)
+
+#     function f_cb(p)
+#         n_eval[] += 1
+#         J = obj(p)                  # plain Float64 — used by line search
+#         @info "[ feval #$(n_eval[])]  J=$J  p=$p"
+#         return J
+#     end
+
+#     function g!_cb(G, p)
+#         n_grad[] += 1
+#         ForwardDiff.gradient!(G, obj, p)
+#         @info "[grad  #$(n_grad[])]  ‖∇J‖=$(sqrt(sum(abs2, G)))  p=$p"
+#         return G
+#     end
+
+#     # Box constraints: keep bump support inside the domain
+#     n_turb = length(p0) ÷ 2
+#     lo = repeat([margin,    margin   ], n_turb)
+#     hi = repeat([Lx-margin, Ly-margin], n_turb)
+
+#     res = optimize(f_cb, g!_cb, lo, hi, copy(p0),
+#                    Fminbox(LBFGS()),
+#                    Optim.Options(iterations  = iterations,
+#                                  g_tol       = g_tol,
+#                                  show_trace  = show_trace,
+#                                  show_every  = 1))
+
+#     return Optim.minimizer(res), Optim.minimum(res), res
+# end
+
+# p_star, J_star, res = lbfgs_optimize(p, base;
+#                                      tspan_opt = (0.0, 0.25 * T),
+#                                      iterations = 30)
+
+# println("\noptimal p = ", p_star)
+# println("final energy E = ", -J_star)
+# println(res)

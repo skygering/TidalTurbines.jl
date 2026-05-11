@@ -34,7 +34,9 @@ function compute_total_turbine_energy(sol, semi, turbines; rho = 1000.0)
     # P_hist = zeros(Float64, nt)
     T = eltype(sol.u[1])
     P_hist = zeros(T, nt)
-    E = zero(T) 
+    
+    R = promote_type(T, eltype(rho))
+    E = zero(R) 
 
     for k in 1:nt
         _, P_total = compute_turbine_powers(semi, sol.u[k], turbines; rho = rho)
@@ -45,6 +47,9 @@ function compute_total_turbine_energy(sol, semi, turbines; rho = 1000.0)
         dt = sol.t[k] - sol.t[k - 1]
         E += 0.5 * (P_hist[k] + P_hist[k - 1]) * dt
     end
+    
+    # Normalization
+    E /= R(1e6) # convert to MJ
 
     return E, P_hist
 end
