@@ -162,9 +162,13 @@ end
 # Bump function for turbine footprint
 # -------------------------------------------------------------------
 @inline function bump_1d(x, p, r)
-    ξ = (x - p) / r
-    if abs(ξ) < 1
-        return exp(1 - inv(1 - ξ^2))
+    ξ  = (x - p) / r
+    ξ2 = ξ * ξ
+    # Inner cutoff: stay strictly away from |ξ|=1 so 1/(1-ξ²) doesn't blow up.
+    # At ξ²=0.9999 the bump value is exp(1 - 1e4) ≈ 0 anyway, so we lose nothing
+    # in physics but avoid the 0·Inf = NaN in the ForwardDiff partials.
+    if ξ2 < 0.9999
+        return exp(1 - inv(1 - ξ2))
     else
         return zero(ξ)
     end
